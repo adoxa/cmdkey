@@ -1,9 +1,9 @@
 
 				     CMDkey
 
-			   Copyright 2006 Jason Hood
+			  Copyright 2006-7 Jason Hood
 
-			    Freeware.  Version 1.00
+			    Freeware.  Version 1.01
 
 
     ===========
@@ -630,6 +630,10 @@
     Macros and multiple commands will remove the prompt, but this relies on
     ECHO being on and the processor adding a blank line.
 
+    If you have scrolled the window to move the current line to the bottom,
+    recalling a command that extends to the next line will not scroll the
+    window to make the entire command visible.
+
     CMD.EXE's internal environment variables will not be expanded.  This may
     cause problems with your own symbols.  For example, I sometimes add the
     current directory to the path:
@@ -648,9 +652,13 @@
 
     Legend: + added, - bug-fixed, * changed.
 
+    v1.01, 20 March, 2007:
+    - scroll the window to display an entire recalled command;
+    - remember Enter when recording a macro.
+
     v1.00, 23 December, 2006:
     + first release.
 
 
-    ==============================
-    Jason Hood, 23 December, 2006.
+    ===========================
+    Jason Hood, 20 March, 2007.

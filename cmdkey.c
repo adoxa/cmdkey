@@ -8,8 +8,8 @@
   Anton Bassov's article in "The Code Project" (use of OpenThread).
 */
 
-#define PVERS "1.00"
-#define PDATE "23 December, 2006"
+#define PVERS "1.01"
+#define PDATE "20 March, 2007"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new

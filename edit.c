@@ -1332,7 +1332,7 @@ void edit_line( void )
 
     if (recording)
     {
-      if (chfn.fn == Record || done)
+      if (chfn.fn == Record)
       {
 	recording = FALSE;
       }
@@ -1355,7 +1355,11 @@ void edit_line( void )
 	  }
 	}
 	if (recording)
+	{
 	  rec_mac->func[rec_mac->len++] = chfn;
+	  if (done)
+	    recording = FALSE;
+	}
       }
       if (!recording)
       {
@@ -1426,6 +1430,12 @@ void edit_line( void )
 	  fill.Attributes = screen.wAttributes;
 	  ScrollConsoleScreenBuffer( hConOut, &src, NULL, dst, &fill );
 	  screen.dwCursorPosition.Y -= src.Top;
+	}
+	else if (c.Y > screen.srWindow.Bottom)
+	{
+	  screen.srWindow.Top += c.Y - screen.srWindow.Bottom;
+	  screen.srWindow.Bottom += c.Y - screen.srWindow.Bottom;
+	  SetConsoleWindowInfo( hConOut, TRUE, &screen.srWindow );
 	}
 
 	c = line_to_scr( dispbeg );
