@@ -1,0 +1,41 @@
+/*
+  cmdkey.rc - Version resource for cmdkey.exe.
+
+  Jason Hood, 23 July, 2010.
+*/
+
+#include <winver.h>
+
+#ifdef NT4
+#define NAME "cmdkeynt"
+#else
+#define NAME "cmdkey"
+#endif
+
+1 VERSIONINFO
+FILEVERSION	1,0,2,0
+PRODUCTVERSION	1,0,2,0
+FILEOS		VOS_NT
+FILETYPE	VFT_APP
+{
+  BLOCK "StringFileInfo"
+  {
+    BLOCK "040904B0"
+    {
+      VALUE "Comments",         "http://cmdkey.adoxa.cjb.net/"
+      VALUE "CompanyName",      "Jason Hood"
+      VALUE "FileDescription",  "Command Line Editor"
+      VALUE "FileVersion",      "1.02"
+      VALUE "InternalName",     NAME
+      VALUE "LegalCopyright",   "Freeware"
+      VALUE "OriginalFilename", NAME ".exe"
+      VALUE "ProductName",      "CMDkey"
+      VALUE "ProductVersion",   "1.02"
+    }
+  }
+
+  BLOCK "VarFileInfo"
+  {
+    VALUE "Translation", 0x0409, 0x04B0
+  }
+}
