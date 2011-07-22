@@ -48,10 +48,12 @@ void DEBUGSTR( char* szFormat, ... )	// sort of OutputDebugStringf
 
 // ========== Global variables and constants
 
-BOOL installed	__attribute__((dllexport, shared, section(".share"))) = FALSE;
-BOOL is_enabled __attribute__((dllexport, shared, section(".share"))) = TRUE;
+#define SHARED __attribute__((dllexport, shared, section(".share")))
 
-Option option __attribute__((dllexport, shared, section(".share"))) = {
+BOOL SHARED installed  = FALSE;
+BOOL SHARED is_enabled = TRUE;
+
+Option SHARED option = {
   { 25, 50 },			// insert & overwrite cursor sizes
   0,				// default insert mode
   0,				// beep on errors
@@ -72,10 +74,8 @@ Option option __attribute__((dllexport, shared, section(".share"))) = {
   30,				// greater than sign,	bright yellow on blue
 };
 
-char cfgname[MAX_PATH] __attribute__((dllexport, shared, section(".share")))
-		       = { 0 }; // default configuration file
-char cmdname[MAX_PATH] __attribute__((dllexport, shared, section(".share")))
-		       = { 0 }; // runtime configuration file
+char SHARED cfgname[MAX_PATH] = { 0 }; // default configuration file
+char SHARED cmdname[MAX_PATH] = { 0 }; // runtime configuration file
 
 
 // Structure to hold a line.
