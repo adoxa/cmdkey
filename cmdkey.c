@@ -11,8 +11,8 @@
   + add -I/-U to use HKLM.
 */
 
-#define PVERS "1.02"
-#define PDATE "23 July, 2010"
+#define PVERS "1.10"
+#define PDATE "22 July, 2011"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new
@@ -271,16 +271,16 @@ int main( int argc, char* argv[] )
 	    }
 	    if (exist > sizeof(TCHAR))
 	    {
-	      RegQueryValueEx( key, AUTORUN, NULL, &type, opt, &exist );
+	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
 	      if (!strstr( opt, cmdkey + 1 ))
 	      {
 		strcpy( opt + --exist, cmdkey );
-		RegSetValueEx( key, AUTORUN, 0, type, opt, exist + len );
+		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist + len );
 	      }
 	    }
 	    else
 	    {
-	      RegSetValueEx( key, AUTORUN, 0, REG_SZ, cmdkey + 1, len );
+	      RegSetValueEx( key, AUTORUN, 0, REG_SZ, (LPBYTE)cmdkey + 1, len );
 	    }
 	    RegCloseKey( key );
 	    free( opt );
@@ -312,7 +312,7 @@ int main( int argc, char* argv[] )
 		puts( "CMDkey: where's all the memory gone?" );
 		return 1;
 	      }
-	      RegQueryValueEx( key, AUTORUN, NULL, &type, opt, &exist );
+	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
 	      cmdpos = strstr( opt, cmdkey );
 	      if (cmdpos)
 	      {
@@ -325,7 +325,7 @@ int main( int argc, char* argv[] )
 		  else if (cmdpos[len] == '&')
 		    ++len;
 		  memcpy( cmdpos, cmdpos + len, exist - len );
-		  RegSetValueEx( key, AUTORUN, 0, type, opt, exist - len );
+		  RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist - len );
 		}
 	      }
 	      free( opt );
@@ -391,7 +391,7 @@ int main( int argc, char* argv[] )
 		    KEY_ALL_ACCESS, NULL, &key, &exist );
     RegSetValueEx( key, "Options", 0, REG_BINARY, (LPBYTE)&option,
 		   sizeof(option) );
-    RegSetValueEx( key, "Cmdfile", 0, REG_SZ, cfgname, strlen( cfgname ) + 1 );
+    RegSetValueEx( key, "Cmdfile", 0, REG_SZ, (LPBYTE)cfgname, strlen( cfgname ) + 1 );
     RegCloseKey( key );
   }
 

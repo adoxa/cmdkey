@@ -524,7 +524,7 @@ const Cfg internal[] = {
 
 #define DEFM	 L"DEFM> "              // prompt for defining a macro
 #define DEFM_LEN 6
-#define ENDM	 L"endm"                // string used to end macro definition
+const WCHAR ENDM[] = L"endm";           // string used to end macro definition
 #define ENDM_LEN 4
 
 
@@ -1669,6 +1669,7 @@ PHistory search_history( PHistory hist, DWORD len, BOOL back )
 BOOL match_file( PCWSTR name, PCWSTR extlist, DWORD extlen, BOOL dirs, BOOL exe,
 		 PHANDLE fh, PWIN32_FIND_DATAW fd )
 {
+  static const WCHAR DOT[] = L".";
   PCWSTR dot;
   WCHAR  path[MAX_PATH], buf[MAX_PATH];
 
@@ -1704,7 +1705,7 @@ BOOL match_file( PCWSTR name, PCWSTR extlist, DWORD extlen, BOOL dirs, BOOL exe,
 	dot = name;
     if (!dot)				// there's no extension, but pretend
     {					//  there is so extensionless matching
-      dot  = L".";                      //  can work
+      dot  = DOT;			//  can work
       name = dot + 1;
     }
     if (exe)
@@ -1712,12 +1713,12 @@ BOOL match_file( PCWSTR name, PCWSTR extlist, DWORD extlen, BOOL dirs, BOOL exe,
       if (match_ext( dot, name - dot, extlist, extlen ) ||
 	  find_assoc( dot, name - dot ))
       {
-	if (dot == L".")                // the dot is needed for association
+	if (dot == DOT) 		// the dot is needed for association
 	  wcscat( fd->cFileName, dot );
 	return TRUE;
       }
       // Didn't find the extension in our lists, so try Windows'.
-      if (dot != L".")
+      if (dot != DOT)
       {
 	memcpy( path, line.txt + path_pos, WSZ(fname_pos - path_pos) );
 	wcscpy( path + fname_pos - path_pos, fd->cFileName );
@@ -1836,11 +1837,11 @@ int find_files( int* pos, int dirs )
   // Add the wildcard if not already present and NUL-terminate the line for the
   // API call (there's always room for it due to max being two less).
   wch[0] = line.txt[*pos];
+  wch[1] = line.txt[*pos+1];
   if (wild)
     line.txt[*pos] = '\0';
   else
   {
-    wch[1] = line.txt[*pos+1];
     line.txt[*pos]   = '*';
     line.txt[*pos+1] = '\0';
   }
@@ -1953,9 +1954,8 @@ int find_files( int* pos, int dirs )
     }
   }
 
-  line.txt[*pos] = wch[0];
-  if (!wild)
-    line.txt[*pos+1] = wch[1];
+  line.txt[*pos]   = wch[0];
+  line.txt[*pos+1] = wch[1];
 
   return prefix;
 }
@@ -2255,7 +2255,7 @@ BOOL get_file_line( void )
 	free( line.txt );
       if (def_macro)
       {
-	line.txt = ENDM;
+	line.txt = (LPWSTR)ENDM;
 	line.len = ENDM_LEN;
 	return TRUE;
       }
@@ -4485,7 +4485,7 @@ BOOL ReadOptions( HKEY root )
     exist = sizeof(option);
     RegQueryValueEx( key, "Options", NULL, NULL, (LPBYTE)&option, &exist );
     exist = sizeof(cfgname);
-    RegQueryValueEx( key, "Cmdfile", NULL, NULL, cfgname, &exist );
+    RegQueryValueEx( key, "Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
     RegCloseKey( key );
     return TRUE;
   }
