@@ -6,6 +6,13 @@
   API hooking derived from ANSI.xs by Jean-Louis Morel, from his Perl package
   Win32::Console::ANSI.  Keyboard hooking based on the hook tutorial sample
   code by RattleSnake: Systemwide Windows Hooks without external DLL.
+
+  v1.02, 23 July, 2010:
+  - better handling of control characters;
+  - fixed alternative directory association in the root;
+  - LSTK was listing Shift+Control for Control keys;
+  - tweaks to completion;
+  + read options from HKLM if they don't exist in HKCU.
 */
 
 #include <stdio.h>
@@ -192,6 +199,41 @@ Line	envvar; 		// buffer for environment variable
 
 #define WSZ( len )	((len) * sizeof(WCHAR)) // byte size of a wide string
 
+
+// Map control characters using the CP437 glyphs as Unicode codepoints.
+const WCHAR ControlChar[] = {  ' ',           //  0
+			      L'\x263A',      //  1 White Smiling Face
+			      L'\x263B',      //  2 Black Smiling Face
+			      L'\x2665',      //  3 Black Heart Suit
+			      L'\x2666',      //  4 Black Diamond Suit
+			      L'\x2663',      //  5 Black Club Suit
+			      L'\x2660',      //  6 Black Spade Suit
+			      L'\x2022',      //  7 Bullet
+			      L'\x25D8',      //  8 Inverse Bullet
+			      L'\x25CB',      //  9 White Circle
+			      L'\x25D9',      // 10 Inverse White Circle
+			      L'\x2642',      // 11 Male Sign
+			      L'\x2640',      // 12 Female Sign
+			      L'\x266A',      // 13 Eigth Note
+			      L'\x266B',      // 14 Beamed Eigth Notes
+			      L'\x263C',      // 15 White Sun With Rays
+			      L'\x25BA',      // 16 Black Right-Pointing Pointer
+			      L'\x25C4',      // 17 Black Left-Pointing Pointer
+			      L'\x2195',      // 18 Up Down Arrow
+			      L'\x203C',      // 19 Double Exclamation Mark
+			      L'\x00B6',      // 20 Pilcrow Sign
+			      L'\x00A7',      // 21 Section Sign
+			      L'\x25AC',      // 22 Black Rectangle
+			      L'\x21A8',      // 23 Up Down Arrow With Base
+			      L'\x2191',      // 24 Upwards Arrow
+			      L'\x2193',      // 25 Downwards Arrow
+			      L'\x2192',      // 26 Rightwards Arrow
+			      L'\x2190',      // 27 Leftwards Arrow
+			      L'\x221F',      // 28 Right Angle
+			      L'\x2194',      // 29 Left Right Arrow
+			      L'\x25B2',      // 30 Black Up-Pointing Pointer
+			      L'\x25BC'       // 31 Black Down-Pointing Pointer
+			    };
 
 // Functions
 enum
@@ -1170,6 +1212,18 @@ void edit_line( void )
 	  fnoq = pq = FALSE;
 	  if (found_quote)
 	    fnoq = pq = TRUE, --path_pos;
+	  else
+	  {
+	    // Check if one of the characters after the prefix needs quoting.
+	    for (fnp = fname->next; fnp != fname; fnp = fnp->next)
+	    {
+	      if (fnp->len > end && quote_needed( fnp->line + end, 1 ))
+	      {
+		pq = TRUE;
+		break;
+	      }
+	    }
+	  }
 	  fnp = fname;
 	  fnm = fname->next->line;
 	  if (fname_cnt == 1 || end == -2 ||
@@ -1444,7 +1498,7 @@ void edit_line( void )
 							   : option.cmd_col,
 				      len, c, &read );
 	// The Unicode version will not write control characters using a
-	// TrueType font, so use the Ansi version to display them.
+	// TrueType font, so remap them to their Unicode code point.
 	for (start = end = 0; end < len; ++end)
 	{
 	  if (line.txt[dispbeg+end] < 32)
@@ -1454,11 +1508,21 @@ void edit_line( void )
 	      WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
 					    end - start, c, &read);
 	      c.X += read;
+	      if (c.X >= screen.dwSize.X)
+	      {
+		c.Y += c.X / screen.dwSize.X;
+		c.X %= screen.dwSize.X;
+	      }
 	    }
 	    start = end + 1;
-	    WriteConsoleOutputCharacterA( hConOut,(LPSTR)(line.txt+dispbeg+end),
+	    WriteConsoleOutputCharacterW( hConOut,
+					  ControlChar + line.txt[dispbeg+end],
 					  1, c, &read );
-	    ++c.X;
+	    if (++c.X == screen.dwSize.X)
+	    {
+	      c.X = 0;
+	      ++c.Y;
+	    }
 	  }
 	}
 	WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
@@ -1838,7 +1902,7 @@ int find_files( int* pos, int dirs )
     // If nothing was found try again without the ignore list.
     if (!match && !exe && !dirs)
       match = match_file(line.txt+path_pos, NULL,extlen=0, FALSE,FALSE, &fh, &fd);
-    prefix = -1 - wild;
+    prefix = (!match || !wild) ? -1 : -2;
     fname_max = fname_cnt = 0;
     while (match)
     {
@@ -1849,6 +1913,7 @@ int find_files( int* pos, int dirs )
       if (end > fname_max)
 	fname_max = end;
       f = new_history( fd.cFileName, end );
+
       if (!f)
 	return -1;
 
@@ -1865,21 +1930,24 @@ int find_files( int* pos, int dirs )
 		(WCHAR)(DWORD)CharLowerW( (PWCHAR)(DWORD)fname->next->line[beg] ))
 	      break;
 	  }
-	  prefix = beg;
+	  // Don't use less than original name (preserve trailing dot).
+	  if (beg >= *pos - fname_pos)
+	    prefix = beg;
 	}
       }
 
-      // Find where to insert the new name to sort the list.
-      for (p = fname->next; p != fname; p = p->next)
+      // Find where to insert the new name to sort the list.  Work backwards,
+      // since NTFS maintains a sorted list, anyway.
+      for (p = fname->prev; p != fname; p = p->prev)
       {
 	if (CompareStringW( LOCALE_USER_DEFAULT, NORM_IGNORECASE,
-			    f->line, f->len, p->line, p->len ) <= 2)
+			    f->line, f->len, p->line, p->len ) == 3)
 	  break;
       }
-      f->next = p;
-      f->prev = p->prev;
-      p->prev->next = f;
-      p->prev = f;
+      f->prev = p;
+      f->next = p->next;
+      p->next->prev = f;
+      p->next = f;
 
       match = match_file( NULL, envvar.txt, extlen, dirs, exe, &fh, &fd );
     }
@@ -2575,6 +2643,8 @@ BOOL associate( void )
       remove_chars( ext, 1 + alt );	// include the alternative indicator
       alt = 0;				//  and don't remove it again
     }
+    else
+      cnt = 1;
   }
   // Don't match a dot by itself, or consecutive dots.
   else if (line.txt[ext] == '.' && (ext == beg || line.txt[ext-1] == '.'))
@@ -3238,7 +3308,7 @@ void execute_lstk( DWORD pos )
 	if (end == 0 || ctrl_key_table[cnt][end] != Ignore)
 	{
 	  fprintf( lstout, "defk %s%c\t", state[end*2+2], cnt + '@' );
-	  list_key( &ctrl_key_table[cnt][1] );
+	  list_key( &ctrl_key_table[cnt][end] );
 	}
       }
     }
@@ -4405,6 +4475,24 @@ HookFn Hooks[] = {
 };
 
 
+BOOL ReadOptions( HKEY root )
+{
+  HKEY	key;
+  DWORD exist;
+
+  if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
+  {
+    exist = sizeof(option);
+    RegQueryValueEx( key, "Options", NULL, NULL, (LPBYTE)&option, &exist );
+    exist = sizeof(cfgname);
+    RegQueryValueEx( key, "Cmdfile", NULL, NULL, cfgname, &exist );
+    RegCloseKey( key );
+    return TRUE;
+  }
+  return FALSE;
+}
+
+
 //-----------------------------------------------------------------------------
 //   DllMain()
 // Function called by the system when processes and threads are initialized
@@ -4427,16 +4515,8 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
       bResult = HookAPIOneMod( GetModuleHandle( NULL ), Hooks );
       if (bResult && !installed)
       {
-	HKEY  key;
-	DWORD exist;
-	RegCreateKeyEx( HKEY_CURRENT_USER, REGKEY, 0, "",
-			REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL,
-			&key, &exist );
-	exist = sizeof(option);
-	RegQueryValueEx( key, "Options", NULL, NULL, (LPBYTE)&option, &exist );
-	exist = sizeof(cfgname);
-	RegQueryValueEx( key, "Cmdfile", NULL, NULL, cfgname, &exist );
-	RegCloseKey( key );
+	if (!ReadOptions( HKEY_CURRENT_USER ))
+	  ReadOptions( HKEY_LOCAL_MACHINE );
 	installed = bResult;
       }
       if (installed)

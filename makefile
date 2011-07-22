@@ -3,14 +3,22 @@
 CC = gcc
 CFLAGS = -Wall -O2
 
+%v.o: %.rc
+	windres $< $@
+
 all: edit.dll cmdkey.exe cmdkeynt.exe
 
-edit.dll: edit.c
-	$(CC) $(CFLAGS) edit.c -mdll -s -o edit.dll -lcomdlg32 \
+edit.dll: edit.c editv.o
+	$(CC) $(CFLAGS) $+ -mdll -s -o edit.dll -lcomdlg32 \
 			-Wl,--out-implib,edit.lib
 
-cmdkey.exe: cmdkey.c
-	$(CC) $(CFLAGS) cmdkey.c -s -o cmdkey.exe edit.lib
+cmdkey.exe: cmdkey.c cmdkeyv.o
+	$(CC) $(CFLAGS) $+ -s -o cmdkey.exe edit.lib
 
-cmdkeynt.exe: cmdkey.c
-	$(CC) $(CFLAGS) -DNT4 cmdkey.c -s -o cmdkeynt.exe edit.lib
+cmdkeynt.exe: cmdkey.c cmdkeyntv.o
+	$(CC) $(CFLAGS) -DNT4 $+ -s -o cmdkeynt.exe edit.lib
+
+editv.o: edit.rc
+cmdkeyv.o: cmdkey.rc
+cmdkeyntv.o: cmdkey.rc
+	windres -DNT4 $< $@

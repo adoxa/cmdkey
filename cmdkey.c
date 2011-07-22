@@ -6,10 +6,13 @@
   Injection code derived from Console Manager by Sergey Oblomov (hoopoepg).
   Additional information from "Process-wide API spying - an ultimate hack" By
   Anton Bassov's article in "The Code Project" (use of OpenThread).
+
+  v1.02, 23 July, 2010:
+  + add -I/-U to use HKLM.
 */
 
-#define PVERS "1.01"
-#define PDATE "20 March, 2007"
+#define PVERS "1.02"
+#define PDATE "23 July, 2010"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new
@@ -68,7 +71,7 @@ int main( int argc, char* argv[] )
   char	 state, lastopt;
   char*  fname;
   unsigned long num;
-  HKEY	 key;
+  HKEY	 key, root;
   DWORD  exist;
   char	 cmdkey[MAX_PATH+4];
   UCHAR* colour = NULL;
@@ -105,6 +108,7 @@ int main( int argc, char* argv[] )
   update = (!installed && argc > 1);
   fname = (active) ? cmdname : cfgname;
 #endif
+  root = HKEY_CURRENT_USER;
 
   for (j = 1; j < argc; ++j)
   {
@@ -246,15 +250,17 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  case 'i':
+	    if (*arg == 'I')
+	      root = HKEY_LOCAL_MACHINE;
 #ifndef NT4
 	    len = GetModuleFileName( NULL, cmdkey + 2, sizeof(cmdkey) - 3 );
+	    strlwr( cmdkey + 2 );
 	    cmdkey[0] = '&';
 	    cmdkey[1] = cmdkey[2+len] = '"';
 	    cmdkey[len += 3] = '\0';
 	    // Add CMDkey to CMD.EXE's AutoRun setting, if not already present.
-	    RegCreateKeyEx( HKEY_CURRENT_USER, CMDKEY, 0, "",
-			    REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL,
-			    &key, &exist );
+	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
+			    KEY_ALL_ACCESS, NULL, &key, &exist );
 	    exist = 0;
 	    RegQueryValueEx( key, AUTORUN, NULL, NULL, NULL, &exist );
 	    opt = malloc( exist + len );
@@ -263,7 +269,7 @@ int main( int argc, char* argv[] )
 	      puts( "CMDkey: where's all the memory gone?" );
 	      return 1;
 	    }
-	    if (exist)
+	    if (exist > sizeof(TCHAR))
 	    {
 	      RegQueryValueEx( key, AUTORUN, NULL, &type, opt, &exist );
 	      if (!strstr( opt, cmdkey + 1 ))
@@ -286,14 +292,16 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  case 'u':
+	    if (*arg == 'U')
+	      root = HKEY_LOCAL_MACHINE;
 #ifndef NT4
 	    // Remove CMDkey from CMD.EXE's AutoRun setting.
 	    len = GetModuleFileName( NULL, cmdkey + 1, sizeof(cmdkey) - 2 );
+	    strlwr( cmdkey + 1 );
 	    cmdkey[0] = cmdkey[1+len] = '"';
 	    cmdkey[len += 2] = '\0';
-	    RegCreateKeyEx( HKEY_CURRENT_USER, CMDKEY, 0, "",
-			    REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL,
-			    &key, &exist );
+	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
+			    KEY_ALL_ACCESS, NULL, &key, &exist );
 	    exist = 0;
 	    RegQueryValueEx( key, AUTORUN, NULL, NULL, NULL, &exist );
 	    if (exist)
@@ -379,7 +387,7 @@ int main( int argc, char* argv[] )
     }
 #endif
 
-    RegCreateKeyEx( HKEY_CURRENT_USER, REGKEY, 0, "", REG_OPTION_NON_VOLATILE,
+    RegCreateKeyEx( root, REGKEY, 0, "", REG_OPTION_NON_VOLATILE,
 		    KEY_ALL_ACCESS, NULL, &key, &exist );
     RegSetValueEx( key, "Options", 0, REG_BINARY, (LPBYTE)&option,
 		   sizeof(option) );

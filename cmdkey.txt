@@ -1,9 +1,9 @@
 
 				     CMDkey
 
-			  Copyright 2006-7 Jason Hood
+			  Copyright 2006-10 Jason Hood
 
-			    Freeware.  Version 1.01
+			    Freeware.  Version 1.02
 
 
     ===========
@@ -90,10 +90,11 @@
 
     -i - Install
 
-    Use this option to make CMDkey permanent.  It will add itself to
+    Use this option to make CMDkey permanent.  It will append itself to
     CMD.EXE's AutoRun registry setting, so every time CMD.EXE runs it will
     also run CMDkey.  This option also has the effect of making the current
-    options the new defaults.
+    options the new defaults.  Normally it installs for the current user;
+    use -I to install for the local machine.
 
     -k - Colours
 
@@ -142,8 +143,8 @@
 
     -u - Uninstall
 
-    Remove the AutoRun entry added by `-i'.  CMDkey will still remain active
-    until CMD.EXE itself exits.
+    Remove the AutoRun entry added by `-i' (`-U' will remove `-I').  CMDkey
+    will still remain active until CMD.EXE itself exits.
 
     -z - Disable
 
@@ -323,7 +324,7 @@
 
     CMDkey examines the argument to the left of the cursor and tries to
     complete it as a file name.  The argument may contain a full disk and
-    path specification.  If several files match only the common part of
+    path specification.  If several files match, only the common part of
     their names will be placed on the command line, unless the argument
     already contained a wildcard.  Subsequent action depends on the method
     of completion chosen: list or cycle.
@@ -652,6 +653,16 @@
 
     Legend: + added, - bug-fixed, * changed.
 
+    v1.02, 23 July, 2010:
+    - handle control characters better;
+    - fixed alternative directory association in the root;
+    - LSTK was using the Shift+Control definition for the Control keys;
+    - fixed completion when an explicit wildcard didn't match anything;
+    - completion will not match smaller than original (preserve trailing dot);
+    * add a quote for completion if a character after the prefix needs it;
+    * improved completion sorting (at least on NTFS);
+    + -I (and -U) install to local machine.
+
     v1.01, 20 March, 2007:
     - scroll the window to display an entire recalled command;
     - remember Enter when recording a macro.
@@ -660,5 +671,5 @@
     + first release.
 
 
-    ===========================
-    Jason Hood, 20 March, 2007.
+    ==========================
+    Jason Hood, 23 July, 2010.
