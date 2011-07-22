@@ -282,6 +282,7 @@ enum
   InsOvr,		// insert/overwrite toggle
   Play, 		// play back a series of keys
   Record,		// record a series of keys
+  Execute,		// execute the line without adding it to the history
   LastFunc
 };
 
@@ -311,6 +312,7 @@ const Cfg cfg[] = {
   f( EndLine	  )
   f( Enter	  )
   f( Erase	  )
+  f( Execute	  )
   f( FirstLine	  )
   f( Ignore	  )
   f( InsOvr	  )
@@ -348,7 +350,7 @@ const char const * func_str[] =
   "DelRight",   "DelWordLeft", "DelWordRight", "DelArg",      "DelBegLine",
   "DelEndLine", "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
   "Transpose",  "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
-  "Wipe",       "InsOvr",      "Play",         "Record",
+  "Wipe",       "InsOvr",      "Play",         "Record",      "Execute",
 };
 
 
@@ -398,12 +400,12 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
   // plain	shift		control 	shift+control
   { DelLeft,	DelLeft,	DelWordLeft,	DelArg, 	},// Backspace
   { Cycle,	CycleBack,	List,		ListDir,	},// Tab
-  { Enter,	Enter,		Ignore, 	Ignore, 	},// Enter
+  { Enter,	Enter,		Execute,	Ignore, 	},// Enter
   { Erase,	Erase,		Ignore, 	Ignore, 	},// Escape
 
   // plain	shift		control 	alt
   { InsOvr,	Ignore, 	Ignore, 	Ignore, 	},// Insert
-  { DelRight,	Ignore, 	Ignore, 	Ignore, 	},// Delete
+  { DelRight,	Ignore, 	DelWordRight,	Ignore, 	},// Delete
 };
 
 char fkey_table[][4] = {	// VK_F1 to VK_F12
@@ -1129,6 +1131,19 @@ void edit_line( void )
 
       case Enter:
 	add_to_history();
+	done = TRUE;
+      break;
+
+      case Execute:
+	// If editing a previous line, move that to the front.
+	if (hist != &history)
+	{
+	  Line temp = line;
+	  line.txt = hist->line;
+	  line.len = hist->len;
+	  add_to_history();
+	  line = temp;
+	}
 	done = TRUE;
       break;
 
