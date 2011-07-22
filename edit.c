@@ -1907,6 +1907,14 @@ int find_files( int* pos, int dirs )
     fname_max = fname_cnt = 0;
     while (match)
     {
+      if (!wild)
+      {
+	// Ensure the name matches what was typed, to overcome Windows foibles
+	// (like "file." matching "file" and ".f" matching "f").
+	if (_wcsnicmp( fd.cFileName, line.txt + fname_pos, *pos - fname_pos ) != 0)
+	  goto next;
+      }
+
       ++fname_cnt;
       end = wcslen( fd.cFileName );
       if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
@@ -1931,9 +1939,7 @@ int find_files( int* pos, int dirs )
 		(WCHAR)(DWORD)CharLowerW( (PWCHAR)(DWORD)fname->next->line[beg] ))
 	      break;
 	  }
-	  // Don't use less than original name (preserve trailing dot).
-	  if (beg >= *pos - fname_pos)
-	    prefix = beg;
+	  prefix = beg;
 	}
       }
 
@@ -1950,6 +1956,7 @@ int find_files( int* pos, int dirs )
       p->next->prev = f;
       p->next = f;
 
+    next:
       match = match_file( NULL, envvar.txt, extlen, dirs, exe, &fh, &fd );
     }
   }
