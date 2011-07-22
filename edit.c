@@ -4212,6 +4212,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 {
   COORD c;
   int	j;
+  DWORD mode;
 
   if (option.disable_cmdkey)
   {
@@ -4222,6 +4223,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
   hConIn  = hConsoleInput;
   hConOut = GetStdHandle( STD_OUTPUT_HANDLE );
   if (enabled && nNumberOfCharsToRead > 1 &&
+      GetConsoleMode( hConIn, &mode ) &&
+      HIWORD( &lpBuffer ) != HIWORD( lpBuffer ) &&	// avoid SET /P
       GetConsoleScreenBufferInfo( hConOut, &screen ))
   {
     trap_break = TRUE;
