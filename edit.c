@@ -42,8 +42,11 @@ void DEBUGSTR( char* szFormat, ... )	// sort of OutputDebugStringf
 #endif
 
 
-// Macro for adding pointers/DWORDs together without C arithmetic interfering
-#define MakePtr( cast, ptr, addValue ) (cast)( (DWORD)(ptr)+(DWORD)(addValue))
+typedef BOOL (WINAPI *FReadConsoleW)( HANDLE, LPVOID, DWORD, LPDWORD, LPVOID );
+typedef BOOL (WINAPI *FWriteConsoleW)( HANDLE, CONST VOID*, DWORD, LPDWORD, LPVOID );
+
+FReadConsoleW  pReadConsoleW;
+FWriteConsoleW pWriteConsoleW;
 
 
 // ========== Global variables and constants
@@ -1580,7 +1583,7 @@ void display_prompt( void )
   {
     WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
     GetConsoleScreenBufferInfo( hConOut, &screen );
-    WriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
+    pWriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
     if (*p_attr)
       WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len,
 				   screen.dwCursorPosition, &read );
@@ -4319,8 +4322,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     return TRUE;
   }
 
-  return ReadConsoleW( hConsoleInput, lpBuffer, nNumberOfCharsToRead,
-		       lpNumberOfCharsRead, lpReserved );
+  return pReadConsoleW( hConsoleInput, lpBuffer, nNumberOfCharsToRead,
+			lpNumberOfCharsRead, lpReserved );
 }
 
 
@@ -4344,8 +4347,8 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 {
   prompt.txt = (PWSTR)lpBuffer;
   prompt.len = nNumberOfCharsToWrite;
-  return WriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
-			lpNumberOfCharsWritten, lpReserved );
+  return pWriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
+			 lpNumberOfCharsWritten, lpReserved );
 }
 
 
@@ -4355,11 +4358,14 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 // - Matt Pietrek ~ Windows 95 System Programming Secrets.
 // - Jeffrey Richter ~ Programming Applications for Microsoft Windows 4th ed.
 
+// Macro for adding pointers/DWORDs together without C arithmetic interfering
+#define MakeVA( cast, addValue ) (cast)( (DWORD)(pDosHeader)+(DWORD)(addValue))
+
 typedef struct
 {
-  PSTR name;
-  PROC newfunc;
-  PROC oldfunc;
+  PSTR	name;
+  PROC	newfunc;
+  PROC* oldfunc;
 } HookFn, *PHookFn;
 
 
@@ -4378,9 +4384,8 @@ BOOL HookAPIOneMod(
   PIMAGE_DOS_HEADER	   pDosHeader;
   PIMAGE_NT_HEADERS	   pNTHeader;
   PIMAGE_IMPORT_DESCRIPTOR pImportDesc;
-  PIMAGE_THUNK_DATA	   pThunk;
+  PIMAGE_THUNK_DATA	   pThunk, pNameThunk;
   PHookFn		   hook;
-  HMODULE		   kernel;
 
   // Tests to make sure we're looking at a module image (the 'MZ' header)
   pDosHeader = (PIMAGE_DOS_HEADER)hFromModule;
@@ -4396,7 +4401,7 @@ BOOL HookAPIOneMod(
   }
 
   // The MZ header has a pointer to the PE header
-  pNTHeader = MakePtr( PIMAGE_NT_HEADERS, pDosHeader, pDosHeader->e_lfanew );
+  pNTHeader = MakeVA( PIMAGE_NT_HEADERS, pDosHeader->e_lfanew );
 
   // More tests to make sure we're looking at a "PE" image
   if (IsBadReadPtr( pNTHeader, sizeof(IMAGE_NT_HEADERS) ))
@@ -4412,11 +4417,10 @@ BOOL HookAPIOneMod(
 
   // We now have a valid pointer to the module's PE header.
   // Get a pointer to its imports section
-  pImportDesc = MakePtr( PIMAGE_IMPORT_DESCRIPTOR,
-			 pDosHeader,
-			 pNTHeader->OptionalHeader.
-			  DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].
-			   VirtualAddress );
+  pImportDesc = MakeVA( PIMAGE_IMPORT_DESCRIPTOR,
+			pNTHeader->OptionalHeader.
+			 DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].
+			  VirtualAddress );
 
   // Bail out if the RVA of the imports section is 0 (it doesn't exist)
   if (pImportDesc == (PIMAGE_IMPORT_DESCRIPTOR)pNTHeader)
@@ -4426,66 +4430,53 @@ BOOL HookAPIOneMod(
 
   // Iterate through the array of imported module descriptors, looking
   // for the module whose name matches the pszFunctionModule parameter
-  while (pImportDesc->Name)
+  for (;; pImportDesc++)
   {
-    PSTR pszModName = MakePtr( PSTR, pDosHeader, pImportDesc->Name );
+    PSTR pszModName = MakeVA( PSTR, pImportDesc->Name );
+
+    // Bail out if we didn't find the import module descriptor for the
+    // specified module (Name will be 0).
+    if (pszModName == (PSTR)pDosHeader)
+      return TRUE;
+
     if (stricmp( pszModName, "kernel32.dll" ) == 0)
       break;
-    pImportDesc++; // Advance to next imported module descriptor
   }
 
-  // Bail out if we didn't find the import module descriptor for the
-  // specified module.  pImportDesc->Name will be non-zero if we found it.
-  if (pImportDesc->Name == 0)
-    return TRUE;
-
   // Get a pointer to the found module's import address table (IAT)
-  pThunk = MakePtr( PIMAGE_THUNK_DATA, pDosHeader, pImportDesc->FirstThunk );
+  pThunk = MakeVA( PIMAGE_THUNK_DATA, pImportDesc->FirstThunk );
+  pNameThunk = MakeVA( PIMAGE_THUNK_DATA, pImportDesc->OriginalFirstThunk );
 
-  // Get the entry points to the original functions.
-  kernel = GetModuleHandle( "kernel32.dll" );
-  for (hook = Hooks; hook->name; ++hook)
-    hook->oldfunc = GetProcAddress( kernel, hook->name );
-
-  // Blast through the table of import addresses, looking for the ones
-  // that match the address we got back from GetProcAddress above.
-  while (pThunk->u1.Function)
+  // Blast through the table of import names
+  while (pNameThunk->u1.AddressOfData)
   {
+    PIMAGE_IMPORT_BY_NAME pName = MakeVA( PIMAGE_IMPORT_BY_NAME,
+					  pNameThunk->u1.AddressOfData );
+    LPCSTR name = (LPCSTR)pName->Name;
     for (hook = Hooks; hook->name; ++hook)
-      // double cast avoid warning with VC6 and VC7 :-)
-      if ((DWORD)pThunk->u1.Function == (DWORD)hook->oldfunc) // We found it!
+    {
+      if (strcmp( name, hook->name ) == 0) // We found it!
       {
-	DWORD flOldProtect, flNewProtect, flDummy;
-	MEMORY_BASIC_INFORMATION mbi;
+	DWORD flOldProtect, flDummy;
 
-	// Get the current protection attributes
-	VirtualQuery( &pThunk->u1.Function, &mbi, sizeof(mbi) );
-	// Take the access protection flags
-	flNewProtect = mbi.Protect;
-	// Remove ReadOnly and ExecuteRead flags
-	flNewProtect &= ~(PAGE_READONLY | PAGE_EXECUTE_READ);
-	// Add on ReadWrite flag
-	flNewProtect |= (PAGE_READWRITE);
 	// Change the access protection on the region of committed pages in the
 	// virtual address space of the current process
 	VirtualProtect( &pThunk->u1.Function, sizeof(PVOID),
-			flNewProtect, &flOldProtect );
+			PAGE_READWRITE, &flOldProtect );
+
+	// Store the original function.
+	*hook->oldfunc = (PROC)pThunk->u1.Function;
 
 	// Overwrite the original address with the address of the new function
-	if (!WriteProcessMemory( GetCurrentProcess(),
-				 &pThunk->u1.Function,
-				 &hook->newfunc,
-				 sizeof(hook->newfunc), NULL ))
-	{
-	  DEBUGSTR( "error: %s(%d)", __FILE__, __LINE__ );
-	  return FALSE;
-	}
+	pThunk->u1.Function = (DWORD)hook->newfunc;
 
 	// Put the page attributes back the way they were.
 	VirtualProtect( &pThunk->u1.Function, sizeof(PVOID),
 			flOldProtect, &flDummy );
       }
+    }
     pThunk++;	// Advance to next imported function address
+    pNameThunk++;
   }
   return TRUE;	// Function not found
 }
@@ -4494,8 +4485,8 @@ BOOL HookAPIOneMod(
 // ========== Initialisation
 
 HookFn Hooks[] = {
-  { "ReadConsoleW",  (PROC)MyReadConsoleW,  NULL },
-  { "WriteConsoleW", (PROC)MyWriteConsoleW, NULL },
+  { "ReadConsoleW",  (PROC)MyReadConsoleW,  (PROC*)&pReadConsoleW  },
+  { "WriteConsoleW", (PROC)MyWriteConsoleW, (PROC*)&pWriteConsoleW },
   { NULL, NULL, NULL }
 };
 
