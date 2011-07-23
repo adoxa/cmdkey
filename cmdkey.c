@@ -251,14 +251,15 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  case 'i':
+#ifndef NT4
 	    if (*arg == 'I')
 	      root = HKEY_LOCAL_MACHINE;
-#ifndef NT4
-	    len = GetModuleFileName( NULL, cmdkey + 2, sizeof(cmdkey) - 3 );
+	    len = GetModuleFileName( NULL, cmdkey + 2, sizeof(cmdkey) - 3 ) + 3;
 	    strlwr( cmdkey + 2 );
 	    cmdkey[0] = '&';
-	    cmdkey[1] = cmdkey[2+len] = '"';
-	    cmdkey[len += 3] = '\0';
+	    cmdkey[1] = '"';
+	    // Replace exe with cmd (too bad if it's been renamed).
+	    strcpy( cmdkey + len - 4, "cmd\"" );
 	    // Add CMDkey to CMD.EXE's AutoRun setting, if not already present.
 	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
 			    KEY_ALL_ACCESS, NULL, &key, &exist );
@@ -293,14 +294,14 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  case 'u':
+#ifndef NT4
 	    if (*arg == 'U')
 	      root = HKEY_LOCAL_MACHINE;
-#ifndef NT4
 	    // Remove CMDkey from CMD.EXE's AutoRun setting.
-	    len = GetModuleFileName( NULL, cmdkey + 1, sizeof(cmdkey) - 2 );
+	    len = GetModuleFileName( NULL, cmdkey + 1, sizeof(cmdkey) - 2 ) + 2;
 	    strlwr( cmdkey + 1 );
-	    cmdkey[0] = cmdkey[1+len] = '"';
-	    cmdkey[len += 2] = '\0';
+	    cmdkey[0] = '"';
+	    strcpy( cmdkey + len - 4, "cmd\"" );
 	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
 			    KEY_ALL_ACCESS, NULL, &key, &exist );
 	    exist = 0;
