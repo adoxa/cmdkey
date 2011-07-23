@@ -20,6 +20,7 @@
 //#define NT4
 
 #define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x0500
 #include <windows.h>
 #ifndef NT4
 #include <tlhelp32.h>
@@ -47,7 +48,7 @@ void status( void );
 void help( void );
 
 #ifndef NT4
-BOOL  find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32 pe );
+BOOL  find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32, LPPROCESSENTRY32 );
 DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo );
 BOOL  IsInstalled( DWORD id );
 #endif
@@ -400,9 +401,6 @@ int main( int argc, char* argv[] )
 #ifndef NT4
     pinfo.hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE,
 				  pinfo.dwProcessId );
-    typedef HANDLE (__stdcall *func)( DWORD, BOOL, DWORD );
-    func OpenThread = (func)GetProcAddress( GetModuleHandle( "KERNEL32.dll" ),
-							     "OpenThread" );
     pinfo.hThread = OpenThread( THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
 				THREAD_SET_CONTEXT, FALSE, pinfo.dwThreadId );
     SuspendThread( pinfo.hThread );
@@ -480,14 +478,18 @@ void status( void )
 #ifndef NT4
 
 // Search each process in the snapshot for id.
-BOOL find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32 pe )
+BOOL find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32 pe,
+		   LPPROCESSENTRY32 ppe )
 {
   BOOL fOk;
 
   pe->dwSize = sizeof(PROCESSENTRY32);
   for (fOk = Process32First( snap, pe ); fOk; fOk = Process32Next( snap, pe ))
+  {
     if (pe->th32ProcessID == id)
       break;
+    *ppe = *pe;
+  }
 
   return fOk;
 }
@@ -496,35 +498,41 @@ BOOL find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32 pe )
 // Obtain the process and thread identifiers of the parent process.
 DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo )
 {
-  HANDLE hModuleSnap = NULL;
-  PROCESSENTRY32 pe;
+  HANDLE hSnap;
+  PROCESSENTRY32 pe, ppe;
   THREADENTRY32  te;
-  DWORD  id = GetCurrentProcessId();
   BOOL	 fOk;
 
-  hModuleSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS|TH32CS_SNAPTHREAD,
-					  id );
-
-  if (hModuleSnap == (HANDLE)-1)
+  hSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS|TH32CS_SNAPTHREAD, 0 );
+  if (hSnap == INVALID_HANDLE_VALUE)
   {
     puts( "CMDkey: unable to obtain process snapshot." );
     exit( 1 );
   }
 
-  find_proc_id( hModuleSnap, id, &pe );
-  find_proc_id( hModuleSnap, pe.th32ParentProcessID, &pe );
+  if (!find_proc_id( hSnap, GetCurrentProcessId(), &pe, &ppe ))
+  {
+    puts( "CMDkey: could not find my process ID." );
+    exit( 1 );
+  }
+  if (ppe.th32ProcessID == pe.th32ParentProcessID)
+    pe = ppe;
+  else if (!find_proc_id( hSnap, pe.th32ParentProcessID, &pe, &ppe ))
+  {
+    puts( "CMDkey: could not find my parent's process ID." );
+    exit( 1 );
+  }
 
   te.dwSize = sizeof(te);
-  for (fOk = Thread32First( hModuleSnap, &te ); fOk;
-       fOk = Thread32Next( hModuleSnap, &te ))
+  for (fOk = Thread32First( hSnap, &te ); fOk; fOk = Thread32Next( hSnap, &te ))
     if (te.th32OwnerProcessID == pe.th32ProcessID)
       break;
 
-  CloseHandle( hModuleSnap );
+  CloseHandle( hSnap );
 
   if (!fOk)
   {
-    puts( "CMDkey: could not obtain parent process." );
+    puts( "CMDkey: could not find my parent's thread ID." );
     exit( 1 );
   }
 
