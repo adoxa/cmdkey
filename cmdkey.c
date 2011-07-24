@@ -362,12 +362,9 @@ int main( int argc, char* argv[] )
   }
   if (update)
   {
-#ifdef NT4
     if (*fname)
       GetFullPathName( fname, sizeof(cfgname), cfgname, NULL );
-#else
-    if (*cfgname)
-      GetFullPathName( cfgname, sizeof(cfgname), cfgname, NULL );
+#ifndef NT4
     else if (!installed)
     {
       j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) );
