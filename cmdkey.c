@@ -451,7 +451,7 @@ void status( void )
 	  "* %s mode is default.\n"
 	  "* Cursor sizes: insert = %d%%, overwrite = %d%%.\n"
 	  "* Backslash appending is %sabled.\n"
-	  "* Empty history search %s.\n"
+	  "* History search %s.\n"
 	  "* Auto-recall is %sabled.\n"
 	  "* Translation is %sabled.\n"
 	  "* Error bell is %sabled.\n"
@@ -463,7 +463,7 @@ void status( void )
 	  (option.overwrite) ? "Overwrite" : "Insert",
 	  option.cursor_size[0], option.cursor_size[1],
 	  (option.no_slash) ? "dis" : "en",
-	  (option.empty_hist)? "moves cursor to end" : "leaves cursor at start",
+	  (option.empty_hist)? "moves cursor to end" : "doesn't move cursor",
 	  (option.auto_recall) ? "en" : "dis",
 	  (option.disable_macro) ? "dis" : "en",
 	  (option.silent) ? "dis" : "en",
@@ -670,7 +670,7 @@ void help( void )
   "\n"
   "    -b\t\tdisable backslash appending for completed directories\n"
   "    -c\t\tswap insert and overwrite cursors, or set their size\n"
-  "    -e\t\tsearching history with an empty line will move cursor to end\n"
+  "    -e\t\tsearching history will move cursor to the end\n"
   "    -g\t\tsilent mode\n"
   "    -h\t\tremember the last HIST commands (0 will remember everything)\n"
   "    -k\t\tdisable colouring\n"

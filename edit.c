@@ -953,6 +953,7 @@ void edit_line( void )
   BOOL	 done = FALSE;			// done editing?
   int	 ovr = option.overwrite;	// insert/overwrite flag
   int	 pos = 0;			// position within the line
+  int	 spos = 0;			// search prefix
   int	 empty = 0;			// searching an empty line?
   int	 recall = option.auto_recall;	// is auto-recall active?
   int	 cont_recall = 1;		// should auto-recall remain active?
@@ -1190,10 +1191,10 @@ void edit_line( void )
 	if (option.empty_hist)
 	{
 	  empty |= 2;
-	  if (empty == 2 && line.len != 0)
-	    empty = 0;
+	  if (empty == 2)
+	    spos = pos;
 	  else
-	    pos = 0;
+	    pos = spos;
 	}
 	shist = search_history( hist, pos, (chfn.fn == SearchBack) );
 	if (shist == NULL)
