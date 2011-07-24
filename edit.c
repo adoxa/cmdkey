@@ -170,6 +170,7 @@ BOOL	kbd;			// is input from the keyboard?
 BOOL	def_macro;		// defining a macro?
 Line	mcmd;			// buffer for multiple commands
 int	lastm;			// previous macro listed was multi-line
+COORD	lastc;			// cursor position of previous command
 
 BOOL	found_quote;		// true if get_string found a quote
 
@@ -4244,16 +4245,15 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     }
     check_break = 1;
 
-    if (macro_stk || mcmd.txt || *cmdname)
+    if (macro_stk || mcmd.txt)
     {
       // Remove the prompt.
       c.X = 0;
       c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
       FillConsoleOutputCharacterW( hConOut, ' ', prompt.len, c,
 				   lpNumberOfCharsRead );
-      // Reclaim the blank line.
-      --c.Y;
-      SetConsoleCursorPosition( hConOut, c );
+      // Restore the position.
+      SetConsoleCursorPosition( hConOut, lastc );
     }
     else
     {
@@ -4345,8 +4345,19 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 			DWORD nNumberOfCharsToWrite,
 			LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved )
 {
-  prompt.txt = (PWSTR)lpBuffer;
-  prompt.len = nNumberOfCharsToWrite;
+  if ((macro_stk || mcmd.txt) &&
+      nNumberOfCharsToWrite == 2 && memcmp( lpBuffer, L"\r\n", 4 ) == 0)
+  {
+    // Remember where the previous command finished, so we can restore it.
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
+    lastc = csbi.dwCursorPosition;
+  }
+  else
+  {
+    prompt.txt = (PWSTR)lpBuffer;
+    prompt.len = nNumberOfCharsToWrite;
+  }
   return pWriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
 			 lpNumberOfCharsWritten, lpReserved );
 }
