@@ -287,6 +287,7 @@ enum
   Play, 		// play back a series of keys
   Record,		// record a series of keys
   Execute,		// execute the line without adding it to the history
+  CopyFromPrev, 	// copy remainder of line from the previous command
   LastFunc
 };
 
@@ -300,6 +301,7 @@ const Cfg cfg[] = {
   f( CharLeft	  )
   f( CharRight	  )
   f( CmdSep	  )
+  f( CopyFromPrev )
   f( Cycle	  )
   f( CycleBack	  )
   f( CycleDir	  )
@@ -346,15 +348,16 @@ const Cfg cfg[] = {
 // Function names for lstk.
 const char const * func_str[] =
 {
-  "Default",    "Ignore",      "Quote",        "CharLeft",    "CharRight",
-  "WordLeft",   "WordRight",   "StringLeft",   "StringRight", "BegLine",
-  "EndLine",    "PrevLine",    "NextLine",     "SearchBack",  "SearchForw",
-  "FirstLine",  "LastLine",    "List",         "ListDir",     "Cycle",
-  "CycleBack",  "CycleDir",    "CycleDirBack", "SelectFiles", "DelLeft",
-  "DelRight",   "DelWordLeft", "DelWordRight", "DelArg",      "DelBegLine",
-  "DelEndLine", "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
-  "Transpose",  "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
-  "Wipe",       "InsOvr",      "Play",         "Record",      "Execute",
+  "Default",      "Ignore",      "Quote",        "CharLeft",    "CharRight",
+  "WordLeft",     "WordRight",   "StringLeft",   "StringRight", "BegLine",
+  "EndLine",      "PrevLine",    "NextLine",     "SearchBack",  "SearchForw",
+  "FirstLine",    "LastLine",    "List",         "ListDir",     "Cycle",
+  "CycleBack",    "CycleDir",    "CycleDirBack", "SelectFiles", "DelLeft",
+  "DelRight",     "DelWordLeft", "DelWordRight", "DelArg",      "DelBegLine",
+  "DelEndLine",   "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
+  "Transpose",    "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
+  "Wipe",         "InsOvr",      "Play",         "Record",      "Execute",
+  "CopyFromPrev",
 };
 
 
@@ -413,19 +416,19 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
 };
 
 char fkey_table[][4] = {	// VK_F1 to VK_F12
-  // plain	shift		control 	alt
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F1
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F2
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F3
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F4
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F5
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F6
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F7
-  { SearchBack, SearchForw,	Ignore, 	Ignore, 	},// F8
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F9
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F10
-  { Ignore,	Ignore, 	Ignore, 	Ignore, 	},// F11
-  { Record,	Ignore, 	Ignore, 	Ignore, 	},// F12
+  // plain	  shift 	control 	alt
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F1
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F2
+  { CopyFromPrev, Ignore,	Ignore, 	Ignore, 	},// F3
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F4
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F5
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F6
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F7
+  { SearchBack,   SearchForw,	Ignore, 	Ignore, 	},// F8
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F9
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F10
+  { Ignore,	  Ignore,	Ignore, 	Ignore, 	},// F11
+  { Record,	  Ignore,	Ignore, 	Ignore, 	},// F12
 };
 
 char ctrl_key_table[][2] = {
@@ -1210,6 +1213,14 @@ void edit_line( void )
 	copy_chars( hist->line, hist->len );
 	if ((chfn.fn != SearchBack && chfn.fn != SearchForw) || (empty & 2))
 	  pos = line.len;
+      break;
+
+      case CopyFromPrev:
+	if (history.prev->len > pos)
+	{
+	  replace_chars( pos, line.len - pos,
+			 history.prev->line + pos, history.prev->len - pos );
+	}
       break;
 
       case List:		// name is  2 for new name completion
