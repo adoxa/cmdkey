@@ -12,9 +12,9 @@
 #define NAME "cmdkey"
 #endif
 
-1 VERSIONINFO
-FILEVERSION	1,0,2,0
-PRODUCTVERSION	1,0,2,0
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION	1,1,0,0
+PRODUCTVERSION	1,1,0,0
 FILEOS		VOS_NT
 FILETYPE	VFT_APP
 {
@@ -25,12 +25,12 @@ FILETYPE	VFT_APP
       VALUE "Comments",         "http://cmdkey.adoxa.cjb.net/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
-      VALUE "FileVersion",      "1.02"
+      VALUE "FileVersion",      "1.10"
       VALUE "InternalName",     NAME
       VALUE "LegalCopyright",   "Freeware"
       VALUE "OriginalFilename", NAME ".exe"
       VALUE "ProductName",      "CMDkey"
-      VALUE "ProductVersion",   "1.02"
+      VALUE "ProductVersion",   "1.10"
     }
   }
 
