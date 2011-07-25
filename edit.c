@@ -164,6 +164,9 @@ CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
 Line	prompt = { L"", 0 };    // pointer to the prompt
 WORD	p_attr[MAX_PATH+2];	// buffer to store prompt's attributes
 BOOL	show_prompt;		// should we redisplay the prompt?
+int	erase_prompt;		// remove the prompt for a multi-cmd?
+DWORD	erase_len;		// how much to remove
+COORD	erase_coord;		// where the prompt starts
 
 Line	line;			// line being edited
 DWORD	max;			// maximum size of above
@@ -4311,17 +4314,20 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 
     if (macro_stk || mcmd.txt)
     {
-      // Remove the prompt.
-      c.X = 0;
-      c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
-      FillConsoleOutputCharacterW( hConOut, ' ', prompt.len, c,
-				   lpNumberOfCharsRead );
-      // Restore the position.
-      SetConsoleCursorPosition( hConOut, lastc );
+      if (erase_prompt == 2)
+      {
+	// Remove the prompt.
+	FillConsoleOutputCharacterW( hConOut, ' ', erase_len, erase_coord,
+				     lpNumberOfCharsRead );
+	// Restore the position.
+	SetConsoleCursorPosition( hConOut, lastc );
+
+	erase_prompt = 0;
+      }
     }
     else
     {
-      if (!option.nocolour &&
+      if (!option.nocolour && prompt.len > 3 &&
 	  prompt.txt[1] == ':' && prompt.txt[prompt.len-1] == '>')
       {
 	// Assume $P$G and colour it appropriately.
@@ -4381,6 +4387,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     line.txt[line.len++] = '\n';
     *lpNumberOfCharsRead = line.len;
 
+    prompt.len	= 0;
     trap_break	= FALSE;
     check_break = 0;
     return TRUE;
@@ -4409,21 +4416,40 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 			DWORD nNumberOfCharsToWrite,
 			LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved )
 {
+  BOOL rc;
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
+
   if ((macro_stk || mcmd.txt) &&
       nNumberOfCharsToWrite == 2 && memcmp( lpBuffer, L"\r\n", 4 ) == 0)
   {
     // Remember where the previous command finished, so we can restore it.
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
     lastc = csbi.dwCursorPosition;
+    erase_prompt = 1;
   }
   else
   {
     prompt.txt = (PWSTR)lpBuffer;
     prompt.len = nNumberOfCharsToWrite;
+    if (erase_prompt == 1)
+    {
+      erase_prompt = 2;
+      GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
+      erase_coord = csbi.dwCursorPosition;
+    }
   }
-  return pWriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
-			 lpNumberOfCharsWritten, lpReserved );
+
+  rc = pWriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
+		       lpNumberOfCharsWritten, lpReserved );
+
+  if (erase_prompt == 2)
+  {
+    GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
+    erase_len = csbi.dwCursorPosition.X - lastc.X
+		+ (csbi.dwCursorPosition.Y - lastc.Y) * csbi.dwSize.X;
+  }
+
+  return rc;
 }
 
 
@@ -4434,7 +4460,7 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 // - Jeffrey Richter ~ Programming Applications for Microsoft Windows 4th ed.
 
 // Macro for adding pointers/DWORDs together without C arithmetic interfering
-#define MakeVA( cast, addValue ) (cast)( (DWORD)(pDosHeader)+(DWORD)(addValue))
+#define MakeVA( cast, addValue ) (cast)((DWORD)(pDosHeader)+(DWORD)(addValue))
 
 typedef struct
 {
