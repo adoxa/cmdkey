@@ -4,7 +4,7 @@
 :: argument is "/C", in which case there's no need to load CMDkey.exe.
 @SetLocal
 :: Strip quotes, since FOR really doesn't like it when they're unbalanced.
-@set cmdline=%CMDCMDLINE:"=%
+@set "cmdline=%CMDCMDLINE:"=%"
 :: This relies on %ComSpec% not having spaces.
 @for /f "tokens=2" %%j in ("%cmdline%") do @set arg1=%%j
 @if /i not "%arg1%" == "/c" "%~dpn0.exe"
