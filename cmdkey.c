@@ -12,7 +12,7 @@
 */
 
 #define PVERS "1.10"
-#define PDATE "22 July, 2011"
+#define PDATE "25 July, 2011"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new
@@ -60,6 +60,7 @@ BOOL   is_enabled	 __attribute__((dllimport));
 Option option		 __attribute__((dllimport));
 char   cfgname[MAX_PATH] __attribute__((dllimport));
 char   cmdname[MAX_PATH] __attribute__((dllimport));
+char   hstname[MAX_PATH] __attribute__((dllimport));
 
 
 int main( int argc, char* argv[] )
@@ -75,6 +76,7 @@ int main( int argc, char* argv[] )
   HKEY	 key, root;
   DWORD  exist;
   char	 cmdkey[MAX_PATH+4];
+  BOOL	 hstfile;
   UCHAR* colour = NULL;
   int	 j;
 #ifndef NT4
@@ -110,6 +112,7 @@ int main( int argc, char* argv[] )
   fname = (active) ? cmdname : cfgname;
 #endif
   root = HKEY_CURRENT_USER;
+  hstfile = FALSE;
 
   for (j = 1; j < argc; ++j)
   {
@@ -251,9 +254,9 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  case 'i':
-#ifndef NT4
 	    if (*arg == 'I')
 	      root = HKEY_LOCAL_MACHINE;
+#ifndef NT4
 	    len = GetModuleFileName( NULL, cmdkey + 2, sizeof(cmdkey) - 3 ) + 3;
 	    strlwr( cmdkey + 2 );
 	    cmdkey[0] = '&';
@@ -294,9 +297,9 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  case 'u':
-#ifndef NT4
 	    if (*arg == 'U')
 	      root = HKEY_LOCAL_MACHINE;
+#ifndef NT4
 	    // Remove CMDkey from CMD.EXE's AutoRun setting.
 	    len = GetModuleFileName( NULL, cmdkey + 1, sizeof(cmdkey) - 2 ) + 2;
 	    strlwr( cmdkey + 1 );
@@ -338,6 +341,12 @@ int main( int argc, char* argv[] )
 #endif
 	  break;
 
+	  case 'f':
+	    hstfile = TRUE;
+	    end = strchr( arg + 1, '\0' );
+	    memcpy( hstname, arg + 1, end - arg );
+	  break;
+
 	  default:
 	    printf( "CMDkey: invalid option: '%c'.\n", *arg );
 	  return 1;
@@ -362,35 +371,29 @@ int main( int argc, char* argv[] )
   }
   if (update)
   {
+    if (hstfile && *hstname)
+      GetFullPathName( hstname, sizeof(hstname), hstname, NULL );
     if (*fname)
       GetFullPathName( fname, sizeof(cfgname), cfgname, NULL );
 #ifndef NT4
     else if (!installed)
     {
-      j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) );
-      arg = NULL;
-      if (j > 4)
+      // Let's just assume it ends with ".exe".
+      j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) ) - 3;
+      strcpy( cfgname + j, "cfg" );
+      if (!hstfile)
       {
-	arg = cfgname + j - 4;
-	if (stricmp( arg, ".exe" ) == 0)
-	{
-	  strcpy( arg, ".cfg" );
-	  if (GetFileAttributes( cfgname ) == ~0)
-	    arg = NULL;
-	}
-	else
-	  arg = NULL;
+	memcpy( hstname, cfgname, j );
+	strcpy( hstname + j, "hst" );
       }
-      if (!arg)
-	*cfgname = 0;
     }
 #endif
 
     RegCreateKeyEx( root, REGKEY, 0, "", REG_OPTION_NON_VOLATILE,
 		    KEY_ALL_ACCESS, NULL, &key, &exist );
-    RegSetValueEx( key, "Options", 0, REG_BINARY, (LPBYTE)&option,
-		   sizeof(option) );
+    RegSetValueEx( key, "Options", 0, REG_BINARY, (LPBYTE)&option, sizeof(option) );
     RegSetValueEx( key, "Cmdfile", 0, REG_SZ, (LPBYTE)cfgname, strlen( cfgname ) + 1 );
+    RegSetValueEx( key, "Hstfile", 0, REG_SZ, (LPBYTE)hstname, strlen( hstname ) + 1 );
     RegCloseKey( key );
   }
 
@@ -433,11 +436,17 @@ void status( void )
 {
   char buf[4];
   char name[MAX_PATH+2];
+  char hst[MAX_PATH+8];
 
   if (option.histsize)
     itoa( option.histsize, buf, 10 );
   else
     strcpy( buf, "all" );
+
+  if (*hstname)
+    sprintf( hst, "file: \"%s\"", hstname );
+  else
+    strcpy( hst, "is not persistent" );
 
   if (*cfgname)
     sprintf( name, "\"%s\"", cfgname );
@@ -455,6 +464,7 @@ void status( void )
 	  "* Ignore character is '%c'.\n"
 	  "* Minimum history line length is %d.\n"
 	  "* History will remember %s lines.\n"
+	  "* History %s.\n"
 	  "* Default configuration file: %s.\n"
 	  "* CMDkey is %sabled.\n",
 	  (option.overwrite) ? "Overwrite" : "Insert",
@@ -467,6 +477,7 @@ void status( void )
 	  option.ignore_char,
 	  option.min_length,
 	  buf,
+	  hst,
 	  name,
 	  (is_enabled) ? "en" : "dis"
 	);
@@ -657,17 +668,19 @@ void help( void )
   "\n"
   "Provide enhanced command line editing for CMD.EXE.\n"
   "\n"
-  "cmdkey [-begkortz] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR] [filename] "
+  "cmdkey [-begkortz] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
+  "       [-kcCMD] [-krREC] [-kp[DRV[,[SEP][,[DIR][,GT]]]]]\n"
+  "       [-f[HISTFILE]] [CFGFILE] "
 #ifdef NT4
   "[-i]\n"
 #else
   "[-iu]\n"
 #endif
-  "       [-kcCMD] [-krREC] [-kp[DRV[,[SEP][,[DIR][,GT]]]]]\n"
   "\n"
   "    -b\t\tdisable backslash appending for completed directories\n"
   "    -c\t\tswap insert and overwrite cursors, or set their size\n"
   "    -e\t\tsearching history will move cursor to the end\n"
+  "    -f\t\tfile to store persistent history (none means don't store)\n"
   "    -g\t\tsilent mode\n"
   "    -h\t\tremember the last HIST commands (0 will remember everything)\n"
   "    -k\t\tdisable colouring\n"
@@ -677,7 +690,7 @@ void help( void )
   "    -r\t\tdefault auto-recall mode\n"
   "    -t\t\tdisable translation\n"
   "    -z\t\tdisable CMDkey\n"
-  "    filename\tfile containing CMDkey commands and/or history lines\n"
+  "    CFGFILE\tfile containing CMDkey commands and/or history lines\n"
   "\n"
   "    CMD\t\tcolour of the command line\n"
   "    REC\t\tcolour when recording a macro\n"

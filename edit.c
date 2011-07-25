@@ -55,6 +55,7 @@ FWriteConsoleW pWriteConsoleW;
 
 BOOL SHARED installed  = FALSE;
 BOOL SHARED is_enabled = TRUE;
+BOOL SHARED is_primary = FALSE;
 
 Option SHARED option = {
   { 25, 50 },			// insert & overwrite cursor sizes
@@ -79,6 +80,7 @@ Option SHARED option = {
 
 char SHARED cfgname[MAX_PATH] = { 0 }; // default configuration file
 char SHARED cmdname[MAX_PATH] = { 0 }; // runtime configuration file
+char SHARED hstname[MAX_PATH] = { 0 }; // history file
 
 
 // Structure to hold a line.
@@ -155,6 +157,7 @@ typedef void (*IntFunc( DWORD ));
 
 
 BOOL	enabled = TRUE; 	// are we active?
+BOOL	primary;		// are we primary?
 
 HANDLE	hConIn, hConOut;	// handles to keyboard input and screen output
 CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
@@ -1685,6 +1688,55 @@ PHistory search_history( PHistory hist, DWORD len, BOOL back )
   } while (!fnd && h != hist);
 
   return (fnd) ? h : NULL;
+}
+
+
+// Write the history to file.  Since editing this file is not really needed,
+// keep it simple and write it as binary.
+void write_history( void )
+{
+  PHistory h;
+
+  file = fopen( hstname, "wb" );
+  if (file == NULL)
+    return;
+
+  for (h = history.next; h != &history; h = h->next)
+  {
+    fwrite( &h->len, 2, 1, file );
+    fwrite( h->line, WSZ(h->len), 1, file );
+  }
+  fclose( file );
+  file = NULL;
+}
+
+
+void read_history( void )
+{
+  file = fopen( hstname, "rb" );
+  if (file == NULL)
+    return;
+
+  line.txt = NULL;
+  max = 0;
+  while (fread( &line.len, 2, 1, file ) == 1)
+  {
+    if (line.len > max)
+    {
+      LPWSTR tmp = realloc( line.txt, WSZ(line.len) );
+      if (tmp == NULL)
+	break;
+      line.txt = tmp;
+      max = line.len;
+    }
+    fread( line.txt, WSZ(line.len), 1, file );
+    add_to_history();
+  }
+  if (line.txt != NULL)
+    free( line.txt );
+
+  fclose( file );
+  file = NULL;
 }
 
 
@@ -4525,6 +4577,8 @@ BOOL ReadOptions( HKEY root )
     RegQueryValueEx( key, "Options", NULL, NULL, (LPBYTE)&option, &exist );
     exist = sizeof(cfgname);
     RegQueryValueEx( key, "Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
+    exist = sizeof(hstname);
+    RegQueryValueEx( key, "Hstfile", NULL, NULL, (LPBYTE)hstname, &exist );
     RegCloseKey( key );
     return TRUE;
   }
@@ -4560,6 +4614,11 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
       }
       if (installed)
       {
+	if (!is_primary)
+	{
+	  primary = is_primary = TRUE;
+	  read_history();
+	}
 	if (*cfgname)
 	  read_cmdfile( cfgname );
 	SetConsoleCtrlHandler( (PHANDLER_ROUTINE)ctrl_break, TRUE );
@@ -4567,6 +4626,11 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
     break;
 
     case DLL_PROCESS_DETACH:
+      if (primary)
+      {
+	is_primary = FALSE;
+	write_history();
+      }
     break;
   }
 
