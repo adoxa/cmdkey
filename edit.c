@@ -4352,7 +4352,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	// Assume $P$G and colour it appropriately.
 	WORD dir_col = option.base_col;
 	p_attr[0] = p_attr[1] = option.drv_col;
-	p_attr[2] = (prompt.txt[3] == '>') ? option.dir_col : option.sep_col;
+	p_attr[2] = (prompt.txt[3] == '>') ? dir_col : option.sep_col;
 	j = prompt.len - 1;
 	p_attr[j] = option.gt_col;
 	while (--j > 2)
