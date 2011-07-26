@@ -29,6 +29,7 @@ typedef struct
   UCHAR sep_col;		// prompt's directory separator colour
   UCHAR dir_col;		// prompt's directory colour
   UCHAR gt_col; 		// prompt's greater-than colour
+  UCHAR base_col;		// prompt's base directory colour
 } Option;
 
 

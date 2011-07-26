@@ -76,6 +76,7 @@ Option SHARED option = {
   30,				// directory separator, bright yellow on blue
   26,				// directory,		bright green  on blue
   30,				// greater than sign,	bright yellow on blue
+  26,				// base directory,	bright green  on blue
 };
 
 char SHARED cfgname[MAX_PATH] = { 0 }; // default configuration file
@@ -4331,12 +4332,21 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	  prompt.txt[1] == ':' && prompt.txt[prompt.len-1] == '>')
       {
 	// Assume $P$G and colour it appropriately.
+	WORD dir_col = option.base_col;
 	p_attr[0] = p_attr[1] = option.drv_col;
 	p_attr[2] = (prompt.txt[3] == '>') ? option.dir_col : option.sep_col;
 	j = prompt.len - 1;
 	p_attr[j] = option.gt_col;
 	while (--j > 2)
-	  p_attr[j] = (prompt.txt[j] == '\\') ? option.sep_col : option.dir_col;
+	{
+	  if (prompt.txt[j] == '\\')
+	  {
+	    p_attr[j] = option.sep_col;
+	    dir_col = option.dir_col;
+	  }
+	  else
+	    p_attr[j] = dir_col;
+	}
 	c.X = 0;
 	c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
 	WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len, c,
@@ -4601,6 +4611,8 @@ BOOL ReadOptions( HKEY root )
   {
     exist = sizeof(option);
     RegQueryValueEx( key, "Options", NULL, NULL, (LPBYTE)&option, &exist );
+    if (exist != sizeof(option))
+      option.base_col = option.dir_col;
     exist = sizeof(cfgname);
     RegQueryValueEx( key, "Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
     exist = sizeof(hstname);

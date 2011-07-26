@@ -12,7 +12,7 @@
 */
 
 #define PVERS "1.10"
-#define PDATE "25 July, 2011"
+#define PDATE "26 July, 2011"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new
@@ -70,7 +70,7 @@ int main( int argc, char* argv[] )
   char*  arg;
   char*  end;
   char*  opt;
-  char	 state, lastopt;
+  char	 state;
   char*  fname;
   unsigned long num;
   HKEY	 key, root;
@@ -123,7 +123,6 @@ int main( int argc, char* argv[] )
 	puts( "CMDkey: missing option." );
 	return 1;
       }
-      lastopt = 0;
       for (arg = argv[j] + 1; *arg; arg = end)
       {
 	if (*arg == '-')
@@ -164,32 +163,19 @@ int main( int argc, char* argv[] )
 	      }
 	      break;
 	    }
-	    lastopt = 'c';
 
 	  case ',':
-	    if (lastopt == 'c')
+	    if (end == arg + 1)
 	    {
-	      if (end == arg + 1)
-	      {
-		puts( "CMDkey: missing cursor size." );
-		return 1;
-	      }
-	      if (num > 100)
-	      {
-		puts( "CMDkey: cursor size must be between 0 and 100." );
-		return 1;
-	      }
-	      option.cursor_size[(*arg == ',')] = (char)num;
+	      puts( "CMDkey: missing cursor size." );
+	      return 1;
 	    }
-	    else if (lastopt == 'k')
+	    if (num > 100)
 	    {
-	      if (++colour > &option.gt_col)
-		break;
-	      end = arg + 1;
-	      goto do_k;
+	      puts( "CMDkey: cursor size must be between 0 and 100." );
+	      return 1;
 	    }
-	    else
-	      end = arg + 1;
+	    option.cursor_size[(*arg == ',')] = (char)num;
 	  break;
 
 	  case 'k':
@@ -198,21 +184,20 @@ int main( int argc, char* argv[] )
 	    {
 	      case 'c': colour = &option.cmd_col; break;
 	      case 'r': colour = &option.rec_col; break;
-	      case 'p': colour = &option.drv_col;
-			lastopt = 'k';
-			break;
+	      case 'd': colour = &option.drv_col; break;
+	      case 's': colour = &option.sep_col; break;
+	      case 'p': colour = &option.dir_col; break;
+	      case 'b': colour = &option.base_col; break;
+	      case 'g': colour = &option.gt_col; break;
 	      default:	opt = &option.nocolour; break;
 	    }
 	    if (opt)
 	      break;
 	    ++end;
-	  do_k:
-	    if (*end == ',')
-	      break;
 	    if (!isxdigit( *end ))
 	    {
 	      printf( "CMDkey: expecting hexadecimal digit for -k%c.\n",
-		      (end[-1] == ',') ? 'p' : end[-1] | 0x20 );
+		      end[-1] | 0x20 );
 	      return 1;
 	    }
 	    num = (*end > '9') ? (*end | 0x20) - 'a' + 10 : *end - '0';
@@ -669,7 +654,7 @@ void help( void )
   "Provide enhanced command line editing for CMD.EXE.\n"
   "\n"
   "cmdkey [-begkortz] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
-  "       [-kcCMD] [-krREC] [-kp[DRV[,[SEP][,[DIR][,GT]]]]]\n"
+  "       [-kcCMD] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
   "       [-f[HISTFILE]] [CFGFILE] "
 #ifdef NT4
   "[-i]\n"
@@ -697,6 +682,7 @@ void help( void )
   "    DRV\t\tcolour of the prompt's drive letter and colon\n"
   "    SEP\t\tcolour of the prompt's directory separator\n"
   "    DIR\t\tcolour of the prompt's directory\n"
+  "    BASE\tcolour of the prompt's base directory\n"
   "    GT\t\tcolour of the prompt's greater-than sign\n"
   "\n"
 #ifdef NT4
