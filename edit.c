@@ -180,6 +180,7 @@ int	lastm;			// previous macro listed was multi-line
 COORD	lastc;			// cursor position of previous command
 
 BOOL	found_quote;		// true if get_string found a quote
+BOOL	macro_arg;		// true for get_string to find a macro argument
 
 FILE*	file;			// file containing commands
 
@@ -2423,11 +2424,13 @@ void get_macro_line( void )
       temp     = line;
       line.txt = macro_stk->name;
       line.len = macro_stk->len;
+      macro_arg = TRUE;
       arg = cnt = 0;
       do
       {
 	arg = get_string( arg + cnt, &cnt, TRUE );
       } while (--argnum);
+      macro_arg = FALSE;
       line = temp;
       var  = 2;
       if (line.txt[pos] != '*' && pos+1 < line.len && line.txt[pos+1] == '*')
@@ -2468,20 +2471,20 @@ void pop_macro( void )
 void multi_cmd( void )
 {
   DWORD pos;
-  BOOL	quote = FALSE;
+  BOOL	quote;
 
   // Do a quick scan to see if it's worthwhile continuing.
   if (!memchr( line.txt, CMDSEP, WSZ(line.len) ))
     return;
 
-  for (pos = 0; pos < line.len; ++pos)
+  for (quote = FALSE, pos = 0; pos < line.len; ++pos)
   {
     if (quote)
     {
-      if (line.txt[pos] == '"')
+      if (is_quote( pos ))
 	quote = FALSE;
     }
-    else if (line.txt[pos] == '"')
+    else if (is_quote( pos ))
       quote = TRUE;
     else if (line.txt[pos] == ESCAPE)
       ++pos;
@@ -2595,7 +2598,10 @@ BOOL brace_expansion( void )
 	q1 = TRUE;
       }
       else if (line.txt[postpos] == ESCAPE)
-	++postpos;
+      {
+	if (postpos+1 < line.len)
+	  ++postpos;
+      }
       else if (line.txt[postpos] == '{')
 	++count;
       else if (line.txt[postpos] == '}')
@@ -2624,7 +2630,10 @@ BOOL brace_expansion( void )
       else if (is_quote( postlen ))
 	q1 = TRUE;
       else if (line.txt[postlen] == ESCAPE)
-	++postlen;
+      {
+	if (postlen+1 < line.len)
+	  ++postlen;
+      }
       else if (line.txt[postlen] == '{')
 	++count;
       else if (line.txt[postlen] == '}')
@@ -2635,7 +2644,10 @@ BOOL brace_expansion( void )
       if (is_quote( postlen ))
 	quote ^= TRUE;
       if (line.txt[postlen] == ESCAPE)
-	++postlen;
+      {
+	if (postlen+1 < line.len)
+	  ++postlen;
+      }
       else if (line.txt[postlen] == '{') // }
 	++count;
       else if (!quote)
@@ -2677,7 +2689,10 @@ BOOL brace_expansion( void )
     else if (is_quote( pos ))
       quote = TRUE;
     else if (line.txt[pos] == ESCAPE)
-      ++pos;
+    {
+      if (pos+1 < line.len)
+	++pos;
+    }
     else if (line.txt[pos] == '{')
       ++count;
     else if (line.txt[pos] == '}')
@@ -4156,6 +4171,9 @@ DWORD get_string( DWORD pos, LPDWORD cnt, BOOL keep )
       }
     }
     else if (isblank( line.txt[pos] ))
+      break;
+    // Stop at ampersand or bar for macro arguments - they start a new command.
+    else if (macro_arg && (line.txt[pos] == '&' || line.txt[pos] == '|'))
       break;
   }
   if (!keep)
