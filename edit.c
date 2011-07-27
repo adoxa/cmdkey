@@ -77,6 +77,7 @@ Option SHARED option = {
   26,				// directory,		bright green  on blue
   30,				// greater than sign,	bright yellow on blue
   26,				// base directory,	bright green  on blue
+  121,				// selection,		bright blue   on grey
   1,				// underscore is part of a word
 };
 
@@ -159,7 +160,7 @@ typedef void (*IntFunc( DWORD ));
 
 
 BOOL	enabled = TRUE; 	// are we active?
-BOOL	primary;		// are we primary?
+BOOL	primary;		// are we the primary instance?
 
 HANDLE	hConIn, hConOut;	// handles to keyboard input and screen output
 CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
@@ -173,6 +174,7 @@ COORD	erase_coord;		// where the prompt starts
 Line	line;			// line being edited
 DWORD	max;			// maximum size of above
 DWORD	dispbeg, dispend;	// beginning and ending position to display
+Line	selected;		// the selection text
 
 BOOL	kbd;			// is input from the keyboard?
 BOOL	def_macro;		// defining a macro?
@@ -300,6 +302,9 @@ enum
   SwapWords,		// swap the current word with the previous
   SwapArgs,		// swap the current argument with the previous
   UnderToggle,		// change behaviour of underscore
+  Select,		// select text
+  Cut,			// cut selected text or current argument
+  Paste,		// paste selected text
   LastFunc
 };
 
@@ -314,6 +319,7 @@ const Cfg cfg[] = {
   f( CharRight	  )
   f( CmdSep	  )
   f( CopyFromPrev )
+  f( Cut	  )
   f( Cycle	  )
   f( CycleBack	  )
   f( CycleDir	  )
@@ -339,12 +345,14 @@ const Cfg cfg[] = {
   f( ListDir	  )
   f( MacroToggle  )
   f( NextLine	  )
+  f( Paste	  )
   f( Play	  )
   f( PrevLine	  )
   f( Quote	  )
   f( Record	  )
   f( SearchBack   )
   f( SearchForw   )
+  f( Select	  )
   f( SelectFiles  )
   f( StoreErase   )
   f( StringLeft   )
@@ -372,7 +380,8 @@ const char const * func_str[] =
   "DelEndLine",   "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
   "Transpose",    "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
   "Wipe",         "InsOvr",      "Play",         "Record",      "Execute",
-  "CopyFromPrev", "SwapWords",   "SwapArgs",     "UnderToggle",
+  "CopyFromPrev", "SwapWords",   "SwapArgs",     "UnderToggle", "Select",
+  "Cut",          "Paste",
 };
 
 
@@ -426,8 +435,8 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
   { Erase,	Erase,		Ignore, 	Ignore, 	},// Escape
 
   // plain	shift		control 	alt
-  { InsOvr,	Ignore, 	Ignore, 	Ignore, 	},// Insert
-  { DelRight,	Ignore, 	DelWordRight,	Ignore, 	},// Delete
+  { InsOvr,	Paste,		Ignore, 	Ignore, 	},// Insert
+  { DelRight,	Cut,		DelWordRight,	Ignore, 	},// Delete
 };
 
 char fkey_table[][4] = {	// VK_F1 to VK_F12
@@ -451,7 +460,7 @@ char ctrl_key_table[][2] = {
   { Ignore,		Ignore, 	}, // ^@
   { BegLine,		SwapArgs,	}, // ^A
   { CharLeft,		Ignore, 	}, // ^B
-  { Ignore,		Ignore, 	}, // ^C
+  { Cut,		Ignore, 	}, // ^C
   { DelRight,		ListDir,	}, // ^D
   { EndLine,		Ignore, 	}, // ^E
   { CharRight,		List,		}, // ^F
@@ -461,10 +470,10 @@ char ctrl_key_table[][2] = {
   { VarSubst,		Ignore, 	}, // ^J
   { DelEndLine, 	Ignore, 	}, // ^K
   { DelWordLeft,	Ignore, 	}, // ^L
-  { Enter,		Ignore, 	}, // ^M
+  { Select,		Ignore, 	}, // ^M
   { NextLine,		Ignore, 	}, // ^N
   { DelEndExec, 	Ignore, 	}, // ^O
-  { PrevLine,		Ignore, 	}, // ^P
+  { PrevLine,		Paste,		}, // ^P
   { Quote,		Ignore, 	}, // ^Q
   { SearchBack, 	Ignore, 	}, // ^R
   { CmdSep,		SelectFiles,	}, // ^S
@@ -558,8 +567,8 @@ COORD line_to_scr( DWORD );		// convert line position to screen
 void  set_display_marks( DWORD, DWORD ); // indicate positions to display
 void  copy_chars( PCWSTR, DWORD );	// set line to string
 void  remove_chars( DWORD, DWORD );	// remove characters from line
-void  insert_chars( DWORD, PCWSTR, DWORD );	    // add string to line
-void  replace_chars( DWORD, DWORD, PCWSTR, DWORD ); // replace string w/ another
+DWORD insert_chars( DWORD, PCWSTR, DWORD );	    // add string to line
+DWORD replace_chars( DWORD, DWORD, PCWSTR, DWORD ); // replace string w/ another
 char* get_key( PKey );			// read a key
 WCHAR process_keypad( WORD );		// translate Alt+Keypad to character
 void  edit_line( void );		// read and edit line from the keyboard
@@ -707,7 +716,7 @@ void remove_chars( DWORD pos, DWORD cnt )
 
 
 // Insert string of cnt characters at pos.
-void insert_chars( DWORD pos, PCWSTR str, DWORD cnt )
+DWORD insert_chars( DWORD pos, PCWSTR str, DWORD cnt )
 {
   if (line.len + cnt > max)
   {
@@ -718,11 +727,12 @@ void insert_chars( DWORD pos, PCWSTR str, DWORD cnt )
   memcpy( line.txt + pos, str, WSZ(cnt) );
   line.len += cnt;
   set_display_marks( pos, line.len );
+  return cnt;
 }
 
 
 // Replace old characters at pos with string of cnt characters.
-void replace_chars( DWORD pos, DWORD old, PCWSTR str, DWORD cnt )
+DWORD replace_chars( DWORD pos, DWORD old, PCWSTR str, DWORD cnt )
 {
   if (old >= cnt)
   {
@@ -735,8 +745,9 @@ void replace_chars( DWORD pos, DWORD old, PCWSTR str, DWORD cnt )
   {
     set_display_marks( pos, pos + old );
     memcpy( line.txt + pos, str, WSZ(old) );
-    insert_chars( pos + old, str + old, cnt - old );
+    cnt = old + insert_chars( pos + old, str + old, cnt - old );
   }
+  return cnt;
 }
 
 
@@ -985,6 +996,8 @@ void edit_line( void )
   BOOL	 dir;				// filename is a directory
   DWORD  start, end, cnt;		// scratch variables
   int	 start1, cnt1;
+  DWORD  markpos = ~0, markbeg = 0, markend = 0; // the selection positions
+  BOOL	 keep_mark;
   DWORD  read;				// dummy variable for API functions
 
   GetConsoleScreenBufferInfo( hConOut, &screen );
@@ -1026,10 +1039,13 @@ void edit_line( void )
     empty >>= 1;			// update state of empty search
     recall &= cont_recall;		// update state of auto-recall
     cont_recall = 0;			//  and assume it shouldn't continue
+    keep_mark = FALSE;			// remove the mark on non-movement
 
     switch (chfn.fn)
     {
       case Ignore:
+	cont_recall = 1;
+	keep_mark = TRUE;
       break;
 
       case Quote:
@@ -1047,14 +1063,18 @@ void edit_line( void )
       case CharLeft:
 	if (pos > 0)
 	  --pos;
+	keep_mark = TRUE;
       break;
 
       case CharRight:
 	if (pos < line.len)
 	  ++pos;
+	keep_mark = TRUE;
       break;
 
       case WordLeft:
+	keep_mark = TRUE;
+
       case DelWordLeft:
 	if (pos > 0)
 	{
@@ -1069,6 +1089,8 @@ void edit_line( void )
       break;
 
       case WordRight:
+	keep_mark = TRUE;
+
       case DelWordRight:
 	if (pos < line.len)
 	{
@@ -1093,19 +1115,37 @@ void edit_line( void )
 	    --pos;
 	  ++pos;
 	}
+	keep_mark = TRUE;
       break;
 
       case StringRight:
 	pos = skip_nonblank( pos );
 	pos = skip_blank( pos );
+	keep_mark = TRUE;
       break;
 
       case BegLine:
 	pos = 0;
+	keep_mark = TRUE;
       break;
 
       case EndLine:
 	pos = line.len;
+	keep_mark = TRUE;
+      break;
+
+      case Select:
+	if (markpos != ~0)
+	{
+	  set_display_marks( markbeg, markend + 1 );
+	  break;
+	}
+	if (line.len == 0)
+	  break;
+	if (pos == line.len)
+	  --pos;
+	markpos = pos;
+	keep_mark = TRUE;
       break;
 
       case DelLeft:
@@ -1120,6 +1160,14 @@ void edit_line( void )
 	cont_recall = 1;
       break;
 
+      case Cut:
+	if (markpos != ~0)
+	{
+	  start = markbeg;
+	  end	= markend + 1;
+	  goto do_cut;
+	}
+
       case DelArg:
 	end = 0;
 	do
@@ -1127,6 +1175,16 @@ void edit_line( void )
 	  start = get_string( end, &cnt, TRUE );
 	  end	= skip_blank( start + cnt );
 	} while (end <= pos && end < line.len);
+
+	if (chfn.fn == Cut)
+	{
+      do_cut:
+	  if (selected.txt)
+	    free( selected.txt );
+	  selected.txt = new_txt( line.txt + start, selected.len = end - start );
+	  if (selected.txt == NULL)
+	    selected.len = 0;
+	}
 	remove_chars( pos = start, end - start );
       break;
 
@@ -1394,9 +1452,8 @@ void edit_line( void )
 	quote = (pq || quote_needed( fnm, end ));
 	if (quote && !fnoq)
 	{
-	  insert_chars( path_pos, L"\"", 1 );
+	  pos += insert_chars( path_pos, L"\"", 1 );
 	  ++fname_pos;
-	  ++pos;
 	  fnoq = TRUE;
 	}
 	else if (!quote && fnoq)
@@ -1409,13 +1466,9 @@ void edit_line( void )
 	dir = (fnm[end-1] == dirchar);
 	if (dir && option.no_slash)
 	  --end;
-	replace_chars( fname_pos, pos - fname_pos, fnm, end );
-	pos = fname_pos + end;
+	pos = fname_pos + replace_chars( fname_pos, pos - fname_pos, fnm, end );
 	if (!dir && fnp != fname)
-	{
-	  insert_chars( pos, L"\" " + 1 - quote, quote + 1 );
-	  pos += quote + 1;
-	}
+	  pos += insert_chars( pos, L"\" " + 1 - quote, quote + 1 );
       break;
 
       case SelectFiles:
@@ -1437,12 +1490,9 @@ void edit_line( void )
 	    f = wcslen( p );
 	    if (dq || (q = quote_needed( p, f )))
 	      insert_chars( pos++, L"\"", 1 );
-	    insert_chars( pos, path, d );
-	    pos += d;
-	    insert_chars( pos, p, f );
-	    pos += f;
-	    insert_chars( pos, L"\" " + 1 - q, q + 1 );
-	    pos += q + 1;
+	    pos += insert_chars( pos, path, d );
+	    pos += insert_chars( pos, p, f );
+	    pos += insert_chars( pos, L"\" " + 1 - q, q + 1 );
 	    p += f + 1;
 	  }
 	}
@@ -1465,12 +1515,14 @@ void edit_line( void )
 
       case UnderToggle:
 	option.underscore ^= 1;
+	keep_mark = TRUE;
       break;
 
       case InsOvr:
 	ovr ^= 1;
 	cci.dwSize = option.cursor_size[ovr];
 	SetConsoleCursorInfo( hConOut, &cci );
+	keep_mark = TRUE;
       break;
 
       case Play:
@@ -1503,6 +1555,26 @@ void edit_line( void )
 	    *key = Record;
 	    set_display_marks( 0, line.len );
 	  }
+	}
+      break;
+
+      case Paste:
+	if (selected.len)
+	{
+	  if (markpos != ~0)
+	  {
+	    pos = markbeg + replace_chars( markbeg, markend - markbeg + 1,
+					   selected.txt, selected.len );
+	  }
+	  else if (ovr)
+	  {
+	    cnt = selected.len;
+	    if (pos + cnt > line.len)
+	      cnt = line.len - pos;
+	    pos += replace_chars( pos, cnt, selected.txt, selected.len );
+	  }
+	  else
+	    pos += insert_chars( pos, selected.txt, selected.len );
 	}
       break;
 
@@ -1594,6 +1666,27 @@ void edit_line( void )
 	bell();
     }
 
+    if (!keep_mark)
+      markpos = ~0;
+    else if (markpos != ~0)
+    {
+      if (pos == markpos)
+	markbeg = markend = pos;
+      else if (pos < markpos)
+      {
+	markbeg = pos;
+	markend = markpos;
+      }
+      else
+      {
+	markbeg = markpos;
+	markend = pos;
+	if (markend == line.len)
+	  --markend;
+      }
+      set_display_marks( markbeg, markend + 1 );
+    }
+
     cnt = dispend - dispbeg;
     if (cnt)
     {
@@ -1630,6 +1723,12 @@ void edit_line( void )
 	  FillConsoleOutputAttribute( hConOut, (recording) ? option.rec_col
 							   : option.cmd_col,
 				      len, c, &read );
+	if (markpos != ~0)
+	{
+	  COORD c = line_to_scr( markbeg );
+	  FillConsoleOutputAttribute( hConOut, option.sel_col,
+				      markend - markbeg + 1, c, &read );
+	}
 	// The Unicode version will not write control characters using a
 	// TrueType font, so remap them to their Unicode code point.
 	for (start = end = 0; end < len; ++end)
@@ -2796,9 +2895,8 @@ BOOL brace_expansion( void )
       --count;
     else if (line.txt[pos] == ',' && count == 0)
     {
-      replace_chars( pos, 1, pend, postlen );
-      insert_chars( pos + postlen, line.txt + prepos, prelen );
-      pos += postlen + prelen - 1;
+      pos += replace_chars( pos, 1, pend, postlen );
+      pos += insert_chars( pos, line.txt + prepos, prelen ) - 1;
     }
   }
   // Remove the closing brace, thus generating the last postpend.

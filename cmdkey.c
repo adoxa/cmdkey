@@ -189,7 +189,8 @@ int main( int argc, char* argv[] )
 	      case 's': colour = &option.sep_col; break;
 	      case 'p': colour = &option.dir_col; break;
 	      case 'b': colour = &option.base_col; break;
-	      case 'g': colour = &option.gt_col; break;
+	      case 'g': colour = &option.gt_col;  break;
+	      case 'm': colour = &option.sel_col; break;
 	      default:	opt = &option.nocolour; break;
 	    }
 	    if (opt)
@@ -655,7 +656,7 @@ void help( void )
   "Provide enhanced command line editing for CMD.EXE.\n"
   "\n"
   "cmdkey [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
-  "       [-kcCMD] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
+  "       [-kcCMD] [-kmSEL] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
   "       [-f[HISTFILE]] [CFGFILE] "
 #ifdef NT4
   "[-i]\n"
@@ -680,6 +681,7 @@ void help( void )
   "    CFGFILE\tfile containing CMDkey commands and/or history lines\n"
   "\n"
   "    CMD\t\tcolour of the command line\n"
+  "    SEL\t\tcolour of selected text\n"
   "    REC\t\tcolour when recording a macro\n"
   "    DRV\t\tcolour of the prompt's drive letter and colon\n"
   "    SEP\t\tcolour of the prompt's directory separator\n"
