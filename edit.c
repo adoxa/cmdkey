@@ -296,6 +296,8 @@ enum
   Record,		// record a series of keys
   Execute,		// execute the line without adding it to the history
   CopyFromPrev, 	// copy remainder of line from the previous command
+  SwapWords,		// swap the current word with the previous
+  SwapArgs,		// swap the current argument with the previous
   LastFunc
 };
 
@@ -345,6 +347,8 @@ const Cfg cfg[] = {
   f( StoreErase   )
   f( StringLeft   )
   f( StringRight  )
+  f( SwapArgs	  )
+  f( SwapWords	  )
   f( Transpose	  )
   f( VarSubst	  )
   f( Wipe	  )
@@ -365,7 +369,7 @@ const char const * func_str[] =
   "DelEndLine",   "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
   "Transpose",    "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
   "Wipe",         "InsOvr",      "Play",         "Record",      "Execute",
-  "CopyFromPrev",
+  "CopyFromPrev", "SwapWords",   "SwapArgs",
 };
 
 
@@ -442,7 +446,7 @@ char fkey_table[][4] = {	// VK_F1 to VK_F12
 char ctrl_key_table[][2] = {
   // plain		// shift
   { Ignore,		Ignore, 	}, // ^@
-  { BegLine,		Ignore, 	}, // ^A
+  { BegLine,		SwapArgs,	}, // ^A
   { CharLeft,		Ignore, 	}, // ^B
   { Ignore,		Ignore, 	}, // ^C
   { DelRight,		ListDir,	}, // ^D
@@ -461,7 +465,7 @@ char ctrl_key_table[][2] = {
   { Quote,		Ignore, 	}, // ^Q
   { SearchBack, 	Ignore, 	}, // ^R
   { CmdSep,		SelectFiles,	}, // ^S
-  { Transpose,		Ignore, 	}, // ^T
+  { Transpose,		SwapWords,	}, // ^T
   { PrevLine,		Ignore, 	}, // ^U
   { SearchForw, 	Ignore, 	}, // ^V
   { DelWordRight,	Ignore, 	}, // ^W
@@ -975,6 +979,7 @@ void edit_line( void )
   BOOL	 quote, fnoq = FALSE, pq = FALSE; // filename quoting flags
   BOOL	 dir;				// filename is a directory
   DWORD  start, end, cnt;		// scratch variables
+  int	 start1, cnt1;
   DWORD  read;				// dummy variable for API functions
 
   GetConsoleScreenBufferInfo( hConOut, &screen );
@@ -1178,6 +1183,86 @@ void edit_line( void )
 	  line.txt[start]   = line.txt[start+1];
 	  line.txt[start+1] = chfn.ch;
 	  set_display_marks( start, start + 2 );
+	}
+      break;
+
+      case SwapWords:
+	cnt = pos;
+	if (cnt < line.len && isword( line.txt[cnt] ))
+	{
+	  start = pos;
+	  while (++cnt < line.len && isword( line.txt[cnt] )) ;
+	}
+	else
+	{
+	  while ((int)--cnt >= 0 && !isword( line.txt[cnt] )) ;
+	  start = ++cnt;
+	}
+	while ((int)--start >= 0 && isword( line.txt[start] )) ;
+	++start;
+	cnt1 = start;
+	while (--cnt1 >= 0 && !isword( line.txt[cnt1] )) ;
+	if (++cnt1 == 0)
+	{
+	  start1 = start;
+	  cnt1 = cnt;
+	  start = cnt;
+	  while (++start < line.len && !isword( line.txt[start] )) ;
+	  if (start >= line.len)
+	    break;
+	  cnt = start;
+	  while (++cnt < line.len && isword( line.txt[cnt] )) ;
+	}
+	else
+	{
+	  start1 = cnt1;
+	  while (--start1 >= 0 && isword( line.txt[start1] )) ;
+	  ++start1;
+	}
+	cnt1 -= start1;
+	cnt -= start;
+	goto do_swap;
+
+      case SwapArgs:
+	end = 0;
+	start = ~0;
+	do
+	{
+	  start1 = start;
+	  cnt1	= cnt;
+	  start = get_string( end, &cnt, TRUE );
+	  end	= skip_blank( start + cnt );
+	} while (end < line.len && (end <= pos || start1 == ~0));
+	if (start1 == ~0 || start >= line.len)
+	  break;
+      do_swap:
+	fnm = new_txt( line.txt + start, cnt );
+	if (!fnm)
+	  break;
+	replace_chars( start, cnt, line.txt + start1, cnt1 );
+	replace_chars( start1, cnt1, fnm, cnt );
+	free( fnm );
+	// Maintain the same relative position.
+	if (pos == start1 || pos >= start + cnt - 1)
+	{
+	  // At the start of the first, or at or beyond the end of the second -
+	  // no change.
+	}
+	else if (pos >= start1 + cnt1 - 1 && pos <= start)
+	{
+	  // Between the end of the first and start of the second - point to
+	  // the "same" position.
+	  pos += cnt - cnt1;
+	}
+	else if (pos > start)
+	{
+	  // Within the second - find same position within the first.
+	  pos = start + cnt - cnt1 + cnt1 * (pos - start) / cnt;
+	}
+	else
+	{
+	  // Within the first - find same position within the second.
+	  pos = start1 + cnt * (pos - start1) / cnt1;
 	}
       break;
 
