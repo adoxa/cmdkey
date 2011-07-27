@@ -1688,12 +1688,15 @@ void display_prompt( void )
   if (kbd)
   {
     WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
-    GetConsoleScreenBufferInfo( hConOut, &screen );
     pWriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
-    if (*p_attr)
-      WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len,
-				   screen.dwCursorPosition, &read );
     GetConsoleScreenBufferInfo( hConOut, &screen );
+    if (*p_attr)
+    {
+      COORD c;
+      c.X = 0;
+      c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
+      WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len, c, &read );
+    }
   }
 }
 
