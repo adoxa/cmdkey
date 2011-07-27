@@ -756,6 +756,8 @@ char* get_key( PKey chfn )
       ReadConsoleInputW( hConIn, &rec, 1, &read );
       if (check_break > 1)
       {
+	// Ignore the ^C that precedes it.
+	--rec.Event.KeyEvent.wRepeatCount;
 	check_break = 1;
 	chfn->fn = Erase;
 	return key;
