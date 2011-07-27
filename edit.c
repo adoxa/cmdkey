@@ -3623,9 +3623,17 @@ BOOL redirect( DWORD pos )
     if (line.txt[pos] == '>' || line.txt[pos] == '|')
     {
       mode = L"w";
-      if (line.txt[pos] == '>' && pos+1 < line.len && line.txt[pos+1] == '>')
-	append = 1, mode = L"a";
-      beg = get_string( pos + 1 + append, &end, FALSE );
+      if (line.txt[pos] == '>')
+      {
+	if (pos+1 < line.len && line.txt[pos+1] == '>')
+	  append = 1, mode = L"a";
+	beg = get_string( pos + 1 + append, &end, FALSE );
+      }
+      else
+      {
+	beg = pos + 1;
+	end = line.len - beg;
+      }
       if (end == 0)
       {
 	puts( "CMDkey: syntax error." );
