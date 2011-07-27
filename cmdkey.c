@@ -12,7 +12,7 @@
 */
 
 #define PVERS "1.10"
-#define PDATE "26 July, 2011"
+#define PDATE "27 July, 2011"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new
@@ -139,7 +139,7 @@ int main( int argc, char* argv[] )
 	opt = NULL;
 	num = strtoul( arg + 1, &end, 10 );
 
-	switch (*arg | 0x20)
+	switch (tolower( *arg ))
 	{
 	  case '/': break;              // allow something like /b/e
 
@@ -149,6 +149,7 @@ int main( int argc, char* argv[] )
 	  case 'o': opt = &option.overwrite;     break;
 	  case 'r': opt = &option.auto_recall;   break;
 	  case 't': opt = &option.disable_macro; break;
+	  case '_': opt = &option.underscore;    break;
 
 	  case 'z': option.disable_cmdkey = 1;   break;
 
@@ -653,7 +654,7 @@ void help( void )
   "\n"
   "Provide enhanced command line editing for CMD.EXE.\n"
   "\n"
-  "cmdkey [-begkortz] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
+  "cmdkey [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
   "       [-kcCMD] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
   "       [-f[HISTFILE]] [CFGFILE] "
 #ifdef NT4
@@ -675,6 +676,7 @@ void help( void )
   "    -r\t\tdefault auto-recall mode\n"
   "    -t\t\tdisable translation\n"
   "    -z\t\tdisable CMDkey\n"
+  "    -_\t\tunderscore is not part of a word\n"
   "    CFGFILE\tfile containing CMDkey commands and/or history lines\n"
   "\n"
   "    CMD\t\tcolour of the command line\n"
@@ -698,7 +700,7 @@ void help( void )
   "CMDkey with no arguments will either install itself into the current CMD.EXE or\n"
   "display the status of the already running instance.\n"
 #endif
-  "When CMDkey is already running options -begkort will toggle the current state;\n"
+  "When CMDkey is already running options -begkort_ will toggle the current state;\n"
   "prefix them with '+' to explicitly turn on (set behaviour indicated above) or\n"
   "with '-' to turn off (set default behaviour).  Eg: \"cmdkey -+b-g\" will disable\n"
   "backslash appending and enable the beep, irrespective of the current state.\n"

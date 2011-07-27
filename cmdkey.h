@@ -30,6 +30,7 @@ typedef struct
   UCHAR dir_col;		// prompt's directory colour
   UCHAR gt_col; 		// prompt's greater-than colour
   UCHAR base_col;		// prompt's base directory colour
+  char	underscore;		// is underscore part of a word?
 } Option;
 
 

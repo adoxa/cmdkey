@@ -77,6 +77,7 @@ Option SHARED option = {
   26,				// directory,		bright green  on blue
   30,				// greater than sign,	bright yellow on blue
   26,				// base directory,	bright green  on blue
+  1,				// underscore is part of a word
 };
 
 char SHARED cfgname[MAX_PATH] = { 0 }; // default configuration file
@@ -298,6 +299,7 @@ enum
   CopyFromPrev, 	// copy remainder of line from the previous command
   SwapWords,		// swap the current word with the previous
   SwapArgs,		// swap the current argument with the previous
+  UnderToggle,		// change behaviour of underscore
   LastFunc
 };
 
@@ -350,6 +352,7 @@ const Cfg cfg[] = {
   f( SwapArgs	  )
   f( SwapWords	  )
   f( Transpose	  )
+  f( UnderToggle  )
   f( VarSubst	  )
   f( Wipe	  )
   f( WordLeft	  )
@@ -369,7 +372,7 @@ const char const * func_str[] =
   "DelEndLine",   "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
   "Transpose",    "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
   "Wipe",         "InsOvr",      "Play",         "Record",      "Execute",
-  "CopyFromPrev", "SwapWords",   "SwapArgs",
+  "CopyFromPrev", "SwapWords",   "SwapArgs",     "UnderToggle",
 };
 
 
@@ -476,7 +479,7 @@ char ctrl_key_table[][2] = {
   { CycleDir,		CycleDirBack,	}, // ^\ (dumb GCC)
   { CmdSep,		Ignore, 	}, // ^]
   { Wipe,		Ignore, 	}, // ^^
-  { MacroToggle,	Ignore, 	}, // ^_
+  { MacroToggle,	UnderToggle,	}, // ^_
 };
 
 
@@ -635,7 +638,7 @@ void  make_relative( PWSTR, PWSTR ); // make an absolute path relative
 
 // Utility
 
-#define isword(  ch ) (IsCharAlphaNumericW( ch ) || ch == '_')
+#define isword(  ch ) (IsCharAlphaNumericW( ch ) || (ch == '_' && option.underscore))
 #define isblank( ch ) (ch == ' ' || ch == '\t')
 
 int   search_cfg( PCWSTR, DWORD, const Cfg [], int ); // find config string
@@ -1458,6 +1461,10 @@ void edit_line( void )
 
       case MacroToggle:
 	option.disable_macro ^= 1;
+      break;
+
+      case UnderToggle:
+	option.underscore ^= 1;
       break;
 
       case InsOvr:
