@@ -260,16 +260,22 @@ enum
   CharRight,		// cursor one character to the right
   WordLeft,		// cursor to the start of the current/previous word
   WordRight,		// cursor to the start of the next word
+  EndWordLeft,		// cursor to the end of the previous word
+  EndWordRight, 	// cursor to the end of the current/next word
   StringLeft,		// cursor to the start of the current/previous string
   StringRight,		// cursor to the start of the next string
   BegLine,		// cursor to the beginning of the line
   EndLine,		// cursor to the end of the line
+  Select,		// select text
+  Cut,			// cut selected text or current argument
+  Paste,		// paste cut text
   PrevLine,		// previous command in history buffer
   NextLine,		// next command in history buffer
   SearchBack,		// search the history backwards
   SearchForw,		// search the history forwards
   FirstLine,		// first command in history
   LastLine,		// last command in history
+  CopyFromPrev, 	// copy remainder of line from the previous command
   List, 		// filename completion list
   ListDir,		// directory completion list
   Cycle,		// filename completion cycle
@@ -289,23 +295,36 @@ enum
   StoreErase,		// erase the line but put it in the history
   CmdSep,		// command separator
   Transpose,		// transpose (swap characters)
+  SwapWords,		// swap the current word with the previous
+  SwapArgs,		// swap the current argument with the previous
   AutoRecall,		// toggle auto-recall
   MacroToggle,		// macro/symbol/brace toggling
+  UnderToggle,		// change behaviour of underscore
   VarSubst,		// inline var. substitution/brace expansion/association
   Enter,		// accept line
+  Execute,		// execute the line without adding it to the history
   Wipe, 		// execute the line but don't put it in the history
   InsOvr,		// insert/overwrite toggle
   Play, 		// play back a series of keys
   Record,		// record a series of keys
-  Execute,		// execute the line without adding it to the history
-  CopyFromPrev, 	// copy remainder of line from the previous command
-  SwapWords,		// swap the current word with the previous
-  SwapArgs,		// swap the current argument with the previous
-  UnderToggle,		// change behaviour of underscore
-  Select,		// select text
-  Cut,			// cut selected text or current argument
-  Paste,		// paste selected text
   LastFunc
+};
+
+
+// Function names for lstk.
+const char const * func_str[] =
+{
+  "Default",     "Ignore",      "Quote",        "CharLeft",     "CharRight",
+  "WordLeft",    "WordRight",   "EndWordLeft",  "EndWordRight", "StringLeft",
+  "StringRight", "BegLine",     "EndLine",      "Select",       "Cut",
+  "Paste",       "PrevLine",    "NextLine",     "SearchBack",   "SearchForw",
+  "FirstLine",   "LastLine",    "CopyFromPrev", "List",         "ListDir",
+  "Cycle",       "CycleBack",   "CycleDir",     "CycleDirBack", "SelectFiles",
+  "DelLeft",     "DelRight",    "DelWordLeft",  "DelWordRight", "DelArg",
+  "DelBegLine",  "DelEndLine",  "DelEndExec",   "Erase",        "StoreErase",
+  "CmdSep",      "Transpose",   "SwapWords",    "SwapArgs",     "AutoRecall",
+  "MacroToggle", "UnderToggle", "VarSubst",     "Enter",        "Execute",
+  "Wipe",        "InsOvr",      "Play",         "Record",
 };
 
 
@@ -334,6 +353,8 @@ const Cfg cfg[] = {
   f( DelWordLeft  )
   f( DelWordRight )
   f( EndLine	  )
+  f( EndWordLeft  )
+  f( EndWordRight )
   f( Enter	  )
   f( Erase	  )
   f( Execute	  )
@@ -365,23 +386,6 @@ const Cfg cfg[] = {
   f( Wipe	  )
   f( WordLeft	  )
   f( WordRight	  )
-};
-
-
-// Function names for lstk.
-const char const * func_str[] =
-{
-  "Default",      "Ignore",      "Quote",        "CharLeft",    "CharRight",
-  "WordLeft",     "WordRight",   "StringLeft",   "StringRight", "BegLine",
-  "EndLine",      "PrevLine",    "NextLine",     "SearchBack",  "SearchForw",
-  "FirstLine",    "LastLine",    "List",         "ListDir",     "Cycle",
-  "CycleBack",    "CycleDir",    "CycleDirBack", "SelectFiles", "DelLeft",
-  "DelRight",     "DelWordLeft", "DelWordRight", "DelArg",      "DelBegLine",
-  "DelEndLine",   "DelEndExec",  "Erase",        "StoreErase",  "CmdSep",
-  "Transpose",    "AutoRecall",  "MacroToggle",  "VarSubst",    "Enter",
-  "Wipe",         "InsOvr",      "Play",         "Record",      "Execute",
-  "CopyFromPrev", "SwapWords",   "SwapArgs",     "UnderToggle", "Select",
-  "Cut",          "Paste",
 };
 
 
@@ -423,9 +427,9 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
   { LastLine,	Ignore, 	Ignore, 	Ignore, 	},// PageDn
   { EndLine,	Ignore, 	DelEndLine,	Ignore, 	},// End
   { BegLine,	Ignore, 	DelBegLine,	Ignore, 	},// Home
-  { CharLeft,	Ignore, 	WordLeft,	StringLeft,	},// Left
+  { CharLeft,	EndWordLeft,	WordLeft,	StringLeft,	},// Left
   { PrevLine,	Ignore, 	Ignore, 	Ignore, 	},// Up
-  { CharRight,	Ignore, 	WordRight,	StringRight,	},// Right
+  { CharRight,	EndWordRight,	WordRight,	StringRight,	},// Right
   { NextLine,	Ignore, 	Ignore, 	Ignore, 	},// Down
 
   // plain	shift		control 	shift+control
@@ -1104,6 +1108,32 @@ void edit_line( void )
 	    remove_chars( start, pos - start );
 	    pos = start;
 	  }
+	}
+      break;
+
+      case EndWordLeft:
+	keep_mark = TRUE;
+	if (pos > 0)
+	{
+	  while (--pos >= 0 && isword( line.txt[pos] )) ;
+	  if (pos < 0)
+	  {
+	    pos = 0;
+	    break;
+	  }
+	  while (--pos >= 0 && !isword( line.txt[pos] )) ;
+	  ++pos;
+	}
+      break;
+
+      case EndWordRight:
+	keep_mark = TRUE;
+	if (pos < line.len)
+	{
+	  while (!isword( line.txt[pos] ) && ++pos < line.len) ;
+	  if (pos == line.len)
+	    break;
+	  while (++pos < line.len && isword( line.txt[pos] )) ;
 	}
       break;
 
