@@ -1137,7 +1137,7 @@ void edit_line( void )
       case Select:
 	if (markpos != ~0)
 	{
-	  set_display_marks( markbeg, markend + 1 );
+	  set_display_marks( markbeg, markend );
 	  break;
 	}
 	if (line.len == 0)
@@ -1164,7 +1164,7 @@ void edit_line( void )
 	if (markpos != ~0)
 	{
 	  start = markbeg;
-	  end	= markend + 1;
+	  end	= markend;
 	  goto do_cut;
 	}
 
@@ -1563,7 +1563,7 @@ void edit_line( void )
 	{
 	  if (markpos != ~0)
 	  {
-	    pos = markbeg + replace_chars( markbeg, markend - markbeg + 1,
+	    pos = markbeg + replace_chars( markbeg, markend - markbeg,
 					   selected.txt, selected.len );
 	  }
 	  else if (ovr)
@@ -1671,20 +1671,21 @@ void edit_line( void )
     else if (markpos != ~0)
     {
       if (pos == markpos)
-	markbeg = markend = pos;
+      {
+	markbeg = pos;
+	markend = pos + 1;
+      }
       else if (pos < markpos)
       {
 	markbeg = pos;
-	markend = markpos;
+	markend = markpos + 1;
       }
       else
       {
 	markbeg = markpos;
 	markend = pos;
-	if (markend == line.len)
-	  --markend;
       }
-      set_display_marks( markbeg, markend + 1 );
+      set_display_marks( markbeg, markend );
     }
 
     cnt = dispend - dispbeg;
@@ -1720,14 +1721,16 @@ void edit_line( void )
 
 	c = line_to_scr( dispbeg );
 	if (!option.nocolour)
+	{
 	  FillConsoleOutputAttribute( hConOut, (recording) ? option.rec_col
 							   : option.cmd_col,
 				      len, c, &read );
-	if (markpos != ~0)
-	{
-	  COORD c = line_to_scr( markbeg );
-	  FillConsoleOutputAttribute( hConOut, option.sel_col,
-				      markend - markbeg + 1, c, &read );
+	  if (markpos != ~0)
+	  {
+	    COORD m = line_to_scr( markbeg );
+	    FillConsoleOutputAttribute( hConOut, option.sel_col,
+					markend - markbeg, m, &read );
+	  }
 	}
 	// The Unicode version will not write control characters using a
 	// TrueType font, so remap them to their Unicode code point.
