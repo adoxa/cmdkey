@@ -12,7 +12,7 @@
 */
 
 #define PVERS "1.10"
-#define PDATE "27 July, 2011"
+#define PDATE "28 July, 2011"
 
 // Uncomment the below when using NT, which doesn't have the tool help library.
 // This means I can't (easily) find the parent process, so it starts a new
@@ -349,6 +349,13 @@ int main( int argc, char* argv[] )
     }
     else
     {
+      FILE* tmp = fopen( argv[j], "r" );
+      if (tmp == NULL)
+      {
+	printf( "CMDkey: could not open \"%s\".\n", argv[j] );
+	return 1;
+      }
+      fclose( tmp );
 #ifdef NT4
       fname = argv[j];
 #else

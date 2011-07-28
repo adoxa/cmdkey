@@ -186,6 +186,9 @@ BOOL	found_quote;		// true if get_string found a quote
 BOOL	macro_arg;		// true for get_string to find a macro argument
 
 FILE*	file;			// file containing commands
+PCSTR	file_name;		// name of the file for the error display
+int	line_no;		// line number of current command
+BOOL	seen_error;		// has an error already been shown?
 
 int	check_break;		// Control+Break received?
 BOOL	trap_break;		// pass it on?
@@ -666,6 +669,7 @@ DWORD get_string( DWORD, LPDWORD, BOOL ); // retrieve argument
 void  un_escape( PCWSTR );		// remove the escape character
 BOOL  match_ext( PCWSTR, DWORD, PCWSTR, DWORD ); // match extension in list
 DWORD get_env_var( PCWSTR, PCWSTR );	// get environment variable
+void  show_error( PCSTR, DWORD, DWORD ); // show an internal command error
 
 
 // -------------------------   Line Manipulation   ---------------------------
@@ -2538,12 +2542,13 @@ void make_relative( PWSTR path, PWSTR rel )
 // will be added to the history.
 BOOL read_cmdfile( PCSTR name )
 {
-  BOOL rc;
+  BOOL rc = FALSE;
 
   kbd = FALSE;
   file = fopen( name, "r" );
   if (file != NULL)
   {
+    file_name = name;
     line.txt = NULL;
     max = 0;
     while (get_file_line())
@@ -2551,14 +2556,16 @@ BOOL read_cmdfile( PCSTR name )
       if (!internal_cmd())
 	add_to_history();
     }
+    if (seen_error)
+    {
+      kbd = TRUE;
+      display_prompt();
+    }
+    line_no = 0;
+    seen_error = FALSE;
     fclose( file );
     file = NULL;
     rc = TRUE;
-  }
-  else
-  {
-    printf( "CMDkey: could not open \"%s\".\n", name );
-    rc = FALSE;
   }
 
   return rc;
@@ -2573,6 +2580,7 @@ BOOL get_file_line( void )
 
   do
   {
+    ++line_no;
     if (fgets( buf, sizeof(buf), file ) == NULL)
     {
       if (line.txt && line.txt != ENDM)
@@ -3190,7 +3198,7 @@ void execute_defk( DWORD pos )
   key = find_key( pos, cnt );
   if (key == NULL)
   {
-    printf( "CMDkey: unrecognised key: %.*S\n", (int)cnt, line.txt + pos );
+    show_error( "unrecognised key", pos, cnt );
     return;
   }
 
@@ -3233,7 +3241,7 @@ void execute_defk( DWORD pos )
     func = search_cfg( line.txt + pos, cnt, cfg, LastFunc - 1 );
     if (func == -1)
     {
-      printf( "CMDkey: unrecognised function: %.*S\n", (int)cnt, line.txt+pos );
+      show_error( "unrecognised function", pos, cnt );
       return;
     }
     if (*key == Play)
@@ -3276,7 +3284,7 @@ void execute_defk( DWORD pos )
 	func = search_cfg( line.txt + pos, cnt, cfg, LastFunc - 1 );
 	if (func == -1)
 	{
-	  printf("CMDkey: unrecognised function: %.*S\n",(int)cnt,line.txt+pos);
+	  show_error( "unrecognised function", pos, cnt );
 	  del_macro( key );
 	  return;
 	}
@@ -3306,8 +3314,7 @@ void execute_defm( DWORD pos )
   if (end < line.len && !isblank( line.txt[end] ))
   {
     end = skip_nonblank( end );
-    printf( "CMDkey: invalid macro name: \"%.*S\".\n",
-	    (int)(end - pos), line.txt + pos );
+    show_error( "invalid macro name", pos, end - pos );
     goto ret;
   }
   cnt = end - pos;
@@ -3379,8 +3386,7 @@ void execute_defs( DWORD pos )
   if (end < line.len && !isblank( line.txt[end] ))
   {
     end = skip_nonblank( end );
-    printf( "CMDkey: invalid symbol name: \"%.*S\".\n",
-	    (int)(end - pos), line.txt + pos );
+    show_error( "invalid symbol name", pos, end - pos );
     return;
   }
   cnt = end - pos;
@@ -4522,6 +4528,31 @@ DWORD get_env_var( PCWSTR var, PCWSTR def )
   }
 
   return varlen;
+}
+
+
+// Show an internal command error.  If reading a file, remove the prompt and
+// show the line number.
+void show_error( PCSTR err, DWORD pos, DWORD len )
+{
+  if (line_no && !seen_error)
+  {
+    if (prompt.len)
+    {
+      COORD c;
+      DWORD read;
+      c.X = 0;
+      c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
+      FillConsoleOutputCharacterW( hConOut, ' ', prompt.len, c, &read );
+      --c.Y;
+      SetConsoleCursorPosition( hConOut, c );
+    }
+    seen_error = TRUE;
+  }
+  fputs( "CMDkey: ", stdout );
+  if (line_no)
+    printf( "%s:%d: ", file_name, line_no );
+  printf( "%s: %.*S.\n", err, (int)len, line.txt + pos );
 }
 
 
