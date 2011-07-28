@@ -580,6 +580,7 @@ char* get_key( PKey );			// read a key
 WCHAR process_keypad( WORD );		// translate Alt+Keypad to character
 void  edit_line( void );		// read and edit line from the keyboard
 void  display_prompt( void );		// re-display the original prompt
+void  remove_prompt( void );		// wipe out the prompt
 
 
 // Definitions (macro, symbol and association)
@@ -1842,6 +1843,26 @@ void display_prompt( void )
       c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
       WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len, c, &read );
     }
+  }
+}
+
+
+// Remove the user's prompt.
+void remove_prompt( void )
+{
+  DWORD w;
+
+  if (erase_prompt == 2)
+  {
+    // Blank out the prompt.
+    FillConsoleOutputCharacterW( hConOut, ' ', erase_len, erase_coord, &w );
+    FillConsoleOutputAttribute( hConOut, screen.wAttributes,
+				erase_len, erase_coord, &w );
+
+    // Restore the position prior to writing it.
+    SetConsoleCursorPosition( hConOut, lastc );
+
+    erase_prompt = 0;
   }
 }
 
@@ -4537,16 +4558,7 @@ void show_error( PCSTR err, DWORD pos, DWORD len )
 {
   if (line_no && !seen_error)
   {
-    if (prompt.len)
-    {
-      COORD c;
-      DWORD read;
-      c.X = 0;
-      c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
-      FillConsoleOutputCharacterW( hConOut, ' ', prompt.len, c, &read );
-      --c.Y;
-      SetConsoleCursorPosition( hConOut, c );
-    }
+    remove_prompt();
     seen_error = TRUE;
   }
   fputs( "CMDkey: ", stdout );
@@ -4599,18 +4611,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     check_break = 1;
 
     if (macro_stk || mcmd.txt)
-    {
-      if (erase_prompt == 2)
-      {
-	// Remove the prompt.
-	FillConsoleOutputCharacterW( hConOut, ' ', erase_len, erase_coord,
-				     lpNumberOfCharsRead );
-	// Restore the position.
-	SetConsoleCursorPosition( hConOut, lastc );
-
-	erase_prompt = 0;
-      }
-    }
+      remove_prompt();
     else
     {
       if (!option.nocolour && prompt.len > 3 &&
@@ -4713,8 +4714,11 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 {
   BOOL rc;
   CONSOLE_SCREEN_BUFFER_INFO csbi;
+  #define TESTSIZE 40
+  WCHAR before[TESTSIZE], after[TESTSIZE];
+  DWORD read;
 
-  if ((macro_stk || mcmd.txt) &&
+  if ((macro_stk || mcmd.txt || *cmdname) &&
       nNumberOfCharsToWrite == 2 && memcmp( lpBuffer, L"\r\n", 4 ) == 0)
   {
     // Remember where the previous command finished, so we can restore it.
@@ -4731,17 +4735,47 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
       erase_prompt = 2;
       GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
       erase_coord = csbi.dwCursorPosition;
+      --erase_coord.Y;
+      ReadConsoleOutputCharacterW( hConsoleOutput, before, TESTSIZE,
+				   erase_coord, &read );
     }
   }
 
   rc = pWriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
 		       lpNumberOfCharsWritten, lpReserved );
 
-  if (erase_prompt == 2)
+  if (erase_prompt)
   {
+    // Check for scroll by comparing the coordinate.
     GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
-    erase_len = csbi.dwCursorPosition.X - lastc.X
-		+ (csbi.dwCursorPosition.Y - lastc.Y) * csbi.dwSize.X;
+    if (erase_prompt == 1)
+    {
+      if (csbi.dwCursorPosition.Y == lastc.Y)
+	--lastc.Y;
+    }
+    else // (erase_prompt == 2)
+    {
+      if (csbi.dwCursorPosition.Y == erase_coord.Y + 1)
+      {
+	// Determine scroll size by comparing screen contents (yuck).
+	int i;
+	for (i = 0; i < 16; ++i)
+	{
+	  ReadConsoleOutputCharacterW( hConsoleOutput, after, TESTSIZE,
+				       erase_coord, &read );
+	  if (memcmp( before, after, WSZ(read) ) == 0)
+	    break;
+	  if (erase_coord.Y == 0)
+	    break;
+	  --lastc.Y;
+	  --erase_coord.Y;
+	}
+      }
+      ++erase_coord.Y;
+      GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
+      erase_len = csbi.dwCursorPosition.X - lastc.X
+		  + (csbi.dwCursorPosition.Y - lastc.Y) * csbi.dwSize.X;
+    }
   }
 
   return rc;
