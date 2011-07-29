@@ -997,6 +997,7 @@ void edit_line( void )
   int	 empty = 0;			// searching an empty line?
   int	 recall = option.auto_recall;	// is auto-recall active?
   int	 cont_recall = 1;		// should auto-recall remain active?
+  BOOL	 failed = FALSE;		// did auto-recall fail to match?
   PHistory hist, shist; 		// position within history, of match
   PHistory fnp = NULL;			// list of completed filenames
   PWSTR  fnm;				// current filename
@@ -1185,7 +1186,18 @@ void edit_line( void )
 
       case DelLeft:
 	if (pos > 0)
-	  remove_chars( --pos, 1 );
+	{
+	  --pos;
+	  if (!recall || failed)
+	    remove_chars( pos, 1 );
+	  else if (pos == 0)
+	  {
+	    set_display_marks( 0, line.len );
+	    line.len = 0;
+	  }
+	  if (pos == 0)
+	    failed = FALSE;
+	}
 	cont_recall = 1;
       break;
 
@@ -1688,12 +1700,20 @@ void edit_line( void )
 	  {
 	    set_display_marks( pos, line.len );
 	    line.len = pos;
+	    if (!failed)
+	    {
+	      failed = TRUE;
+	      cont_recall = 1;
+	    }
+	    else
+	      failed = FALSE;
 	  }
 	  else
 	  {
 	    hist = shist;
 	    copy_chars( hist->line, hist->len );
 	    cont_recall = 1;
+	    failed = FALSE;
 	  }
 	}
       }
