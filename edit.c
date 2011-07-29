@@ -19,6 +19,7 @@
 #include <windows.h>
 #include <ImageHlp.h>
 #include <tchar.h>
+#include <wctype.h>
 #include <string.h>
 #include "cmdkey.h"
 
@@ -276,6 +277,8 @@ enum
   NextLine,		// next command in history buffer
   SearchBack,		// search the history backwards
   SearchForw,		// search the history forwards
+  FindBack,		// incrementally search the history backwards
+  FindForw,		// incrementally search the history forwards
   FirstLine,		// first command in history
   LastLine,		// last command in history
   CopyFromPrev, 	// copy remainder of line from the previous command
@@ -317,17 +320,16 @@ enum
 // Function names for lstk.
 const char const * func_str[] =
 {
-  "Default",     "Ignore",      "Quote",        "CharLeft",     "CharRight",
-  "WordLeft",    "WordRight",   "EndWordLeft",  "EndWordRight", "StringLeft",
-  "StringRight", "BegLine",     "EndLine",      "Select",       "Cut",
-  "Paste",       "PrevLine",    "NextLine",     "SearchBack",   "SearchForw",
-  "FirstLine",   "LastLine",    "CopyFromPrev", "List",         "ListDir",
-  "Cycle",       "CycleBack",   "CycleDir",     "CycleDirBack", "SelectFiles",
-  "DelLeft",     "DelRight",    "DelWordLeft",  "DelWordRight", "DelArg",
-  "DelBegLine",  "DelEndLine",  "DelEndExec",   "Erase",        "StoreErase",
-  "CmdSep",      "Transpose",   "SwapWords",    "SwapArgs",     "AutoRecall",
-  "MacroToggle", "UnderToggle", "VarSubst",     "Enter",        "Execute",
-  "Wipe",        "InsOvr",      "Play",         "Record",
+  "Default", "Ignore", "Quote", "CharLeft", "CharRight", "WordLeft",
+  "WordRight", "EndWordLeft", "EndWordRight", "StringLeft", "StringRight",
+  "BegLine", "EndLine", "Select", "Cut", "Paste", "PrevLine", "NextLine",
+  "SearchBack", "SearchForw", "FindBack", "FindForw", "FirstLine", "LastLine",
+  "CopyFromPrev", "List", "ListDir", "Cycle", "CycleBack", "CycleDir",
+  "CycleDirBack", "SelectFiles", "DelLeft", "DelRight", "DelWordLeft",
+  "DelWordRight", "DelArg", "DelBegLine", "DelEndLine", "DelEndExec", "Erase",
+  "StoreErase", "CmdSep", "Transpose", "SwapWords", "SwapArgs", "AutoRecall",
+  "MacroToggle", "UnderToggle", "VarSubst", "Enter", "Execute", "Wipe",
+  "InsOvr", "Play", "Record",
 };
 
 
@@ -361,6 +363,8 @@ const Cfg cfg[] = {
   f( Enter	  )
   f( Erase	  )
   f( Execute	  )
+  f( FindBack	  )
+  f( FindForw	  )
   f( FirstLine	  )
   f( Ignore	  )
   f( InsOvr	  )
@@ -431,9 +435,9 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
   { EndLine,	Ignore, 	DelEndLine,	Ignore, 	},// End
   { BegLine,	Ignore, 	DelBegLine,	Ignore, 	},// Home
   { CharLeft,	EndWordLeft,	WordLeft,	StringLeft,	},// Left
-  { PrevLine,	Ignore, 	Ignore, 	Ignore, 	},// Up
+  { PrevLine,	Ignore, 	FindBack,	Ignore, 	},// Up
   { CharRight,	EndWordRight,	WordRight,	StringRight,	},// Right
-  { NextLine,	Ignore, 	Ignore, 	Ignore, 	},// Down
+  { NextLine,	Ignore, 	FindForw,	Ignore, 	},// Down
 
   // plain	shift		control 	shift+control
   { DelLeft,	DelLeft,	DelWordLeft,	DelArg, 	},// Backspace
@@ -482,11 +486,11 @@ char ctrl_key_table[][2] = {
   { DelEndExec, 	Ignore, 	}, // ^O
   { PrevLine,		Paste,		}, // ^P
   { Quote,		Ignore, 	}, // ^Q
-  { SearchBack, 	Ignore, 	}, // ^R
+  { SearchBack, 	FindBack,	}, // ^R
   { CmdSep,		SelectFiles,	}, // ^S
   { Transpose,		SwapWords,	}, // ^T
   { PrevLine,		Ignore, 	}, // ^U
-  { SearchForw, 	Ignore, 	}, // ^V
+  { SearchForw, 	FindForw,	}, // ^V
   { DelWordRight,	Ignore, 	}, // ^W
   { DelBegLine, 	Ignore, 	}, // ^X
   { AutoRecall, 	Ignore, 	}, // ^Y
@@ -631,6 +635,7 @@ PHistory new_history( PCWSTR, DWORD );		// allocate new history item
 void	 remove_from_history( PHistory );	// remove item from history
 void	 add_to_history( void );		// add current line to history
 PHistory search_history( PHistory, DWORD, BOOL ); // search history for match
+PHistory find_history( PHistory, int*, DWORD, BOOL );
 
 
 // Filename completion
@@ -993,8 +998,9 @@ void edit_line( void )
   BOOL	 done = FALSE;			// done editing?
   int	 ovr = option.overwrite;	// insert/overwrite flag
   int	 pos = 0;			// position within the line
-  int	 spos = 0;			// search prefix
+  int	 spos = 0, slen = 0;		// search prefix, find length
   int	 empty = 0;			// searching an empty line?
+  int	 find = 0;			// incremental search direction
   int	 recall = option.auto_recall;	// is auto-recall active?
   int	 cont_recall = 1;		// should auto-recall remain active?
   BOOL	 failed = FALSE;		// did auto-recall fail to match?
@@ -1047,6 +1053,8 @@ void edit_line( void )
     compl >>= 1;			// update state of completion
     name  >>= 1;
     empty >>= 1;			// update state of empty search
+    if (!cont_recall)			// update state of incremental search
+      find = slen = 0;
     recall &= cont_recall;		// update state of auto-recall
     cont_recall = 0;			//  and assume it shouldn't continue
     keep_mark = FALSE;			// remove the mark on non-movement
@@ -1188,15 +1196,23 @@ void edit_line( void )
 	if (pos > 0)
 	{
 	  --pos;
-	  if (!recall || failed)
-	    remove_chars( pos, 1 );
-	  else if (pos == 0)
+	  if (find && slen)
 	  {
-	    set_display_marks( 0, line.len );
-	    line.len = 0;
+	    if (--slen == 0)
+	      break;
 	  }
-	  if (pos == 0)
-	    failed = FALSE;
+	  else
+	  {
+	    if (!recall || failed)
+	      remove_chars( pos, 1 );
+	    else if (pos == 0)
+	    {
+	      set_display_marks( 0, line.len );
+	      line.len = 0;
+	    }
+	    if (pos == 0)
+	      failed = FALSE;
+	  }
 	}
 	cont_recall = 1;
       break;
@@ -1204,7 +1220,6 @@ void edit_line( void )
       case DelRight:
 	if (pos < line.len)
 	  remove_chars( pos, 1 );
-	cont_recall = 1;
       break;
 
       case Cut:
@@ -1253,6 +1268,7 @@ void edit_line( void )
 	set_display_marks( 0, line.len );
 	pos = line.len = 0;
 	cont_recall = 1;
+	find = slen = 0;
 	hist = &history;
       break;
 
@@ -1416,6 +1432,26 @@ void edit_line( void )
 	copy_chars( hist->line, hist->len );
 	if ((chfn.fn != SearchBack && chfn.fn != SearchForw) || (empty & 2))
 	  pos = line.len;
+      break;
+
+      case FindBack:
+      case FindForw:
+	find = (chfn.fn == FindBack) ? -1 : 1;
+	if (slen == 0)
+	  slen = pos;
+	if (slen)
+	{
+	  shist = find_history( (find == -1) ? hist->prev : hist->next,
+				&pos, slen, (find == -1) );
+	  if (shist == NULL)
+	    bell();
+	  else
+	  {
+	    hist = shist;
+	    copy_chars( hist->line, hist->len );
+	  }
+	}
+	cont_recall = 1;
       break;
 
       case CopyFromPrev:
@@ -1676,7 +1712,7 @@ void edit_line( void )
 
     if (chfn.fn == Default)
     {
-      if (ovr || recall)
+      if (ovr || recall || find)
       {
 	if (pos != max)
 	{
@@ -1693,7 +1729,26 @@ void edit_line( void )
       if (dispend)
       {
 	line.txt[pos++] = chfn.ch;
-	if (recall)
+	slen++;
+	if (find)
+	{
+	  shist = find_history( hist, &pos, slen, (find == -1) );
+	  if (shist == NULL)
+	  {
+	    --pos;
+	    --slen;
+	    if (pos < hist->len)
+	      line.txt[pos] = hist->line[pos];
+	    bell();
+	  }
+	  else
+	  {
+	    hist = shist;
+	    copy_chars( hist->line, hist->len );
+	  }
+	  cont_recall = 1;
+	}
+	else if (recall)
 	{
 	  shist = search_history( hist->next, pos, TRUE );
 	  if (shist == NULL)
@@ -1970,6 +2025,39 @@ PHistory search_history( PHistory hist, DWORD len, BOOL back )
 }
 
 
+// Find the len characters before pos of the line in the history (ignoring
+// case).  back is TRUE to search backwards (most recent lines first).	Search
+// starts from hist.  Return a pointer to the matching history, setting pos to
+// the position in the new line, or NULL if not found.
+PHistory find_history( PHistory hist, int* pos, DWORD len, BOOL back )
+{
+  PHistory h;
+  PCWSTR txt;
+  WCHAR  c;
+  DWORD  p;
+
+  p = *pos - len;
+  txt = line.txt + p;
+  c = towlower( *txt );
+  h = hist;
+  for (;;)
+  {
+    for (p = 0; p + len <= h->len; ++p)
+    {
+      if (c == towlower( h->line[p] ) &&
+	  _wcsnicmp( txt + 1, h->line + p + 1, len - 1 ) == 0)
+      {
+	*pos = p + len;
+	return h;
+      }
+    }
+    h = (back) ? h->prev : h->next;
+    if (h == hist)
+      return NULL;
+  }
+}
+
+
 // Write the history to file.  Since editing this file is not really needed,
 // keep it simple and write it as binary.
 void write_history( void )
@@ -2002,7 +2090,7 @@ void read_history( void )
   {
     if (line.len > max)
     {
-      LPWSTR tmp = realloc( line.txt, WSZ(line.len) );
+      PWSTR tmp = realloc( line.txt, WSZ(line.len) );
       if (tmp == NULL)
 	break;
       line.txt = tmp;
@@ -2628,7 +2716,7 @@ BOOL get_file_line( void )
 	free( line.txt );
       if (def_macro)
       {
-	line.txt = (LPWSTR)ENDM;
+	line.txt = (PWSTR)ENDM;
 	line.len = ENDM_LEN;
 	return TRUE;
       }
