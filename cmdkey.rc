@@ -5,16 +5,11 @@
 */
 
 #include <winver.h>
-
-#ifdef NT4
-#define NAME "cmdkeynt"
-#else
-#define NAME "cmdkey"
-#endif
+#include "version.h"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION	1,1,0,0
-PRODUCTVERSION	1,1,0,0
+FILEVERSION	PVERB
+PRODUCTVERSION	PVERB
 FILEOS		VOS_NT
 FILETYPE	VFT_APP
 {
@@ -25,12 +20,12 @@ FILETYPE	VFT_APP
       VALUE "Comments",         "http://cmdkey.adoxa.cjb.net/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
-      VALUE "FileVersion",      "1.10"
-      VALUE "InternalName",     NAME
+      VALUE "FileVersion",      PVERS
+      VALUE "InternalName",     "CMDkey"
       VALUE "LegalCopyright",   "Freeware"
-      VALUE "OriginalFilename", NAME ".exe"
+      VALUE "OriginalFilename", "cmdkey.exe"
       VALUE "ProductName",      "CMDkey"
-      VALUE "ProductVersion",   "1.10"
+      VALUE "ProductVersion",   PVERS
     }
   }
 

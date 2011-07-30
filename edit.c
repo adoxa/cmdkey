@@ -22,6 +22,7 @@
 #include <wctype.h>
 #include <string.h>
 #include "cmdkey.h"
+#include "version.h"
 
 
 // ========== Auxiliary debug function
@@ -55,7 +56,6 @@ FWriteConsoleW pWriteConsoleW;
 #define SHARED __attribute__((dllexport, shared, section(".share")))
 
 BOOL SHARED installed  = FALSE;
-BOOL SHARED is_enabled = TRUE;
 BOOL SHARED is_primary = FALSE;
 
 Option SHARED option = {
@@ -84,7 +84,7 @@ Option SHARED option = {
 
 char SHARED cfgname[MAX_PATH] = { 0 }; // default configuration file
 char SHARED cmdname[MAX_PATH] = { 0 }; // runtime configuration file
-char SHARED hstname[MAX_PATH] = { 0 }; // history file
+char SHARED hstname[MAX_PATH] = { 0 }; // primary history file
 
 
 // Structure to hold a line.
@@ -160,8 +160,15 @@ typedef struct history_s
 typedef void (*IntFunc( DWORD ));
 
 
-BOOL	enabled = TRUE; 	// are we active?
 BOOL	primary;		// are we the primary instance?
+BOOL	save_history;		// preserve history?
+
+__declspec(dllexport)
+Status	local = {
+  PVERX,
+  TRUE, 			// we are active
+  { 0 },			// history file
+};
 
 HANDLE	hConIn, hConOut;	// handles to keyboard input and screen output
 CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
@@ -607,7 +614,7 @@ void	free_linelist( PLineList );		// free memory used by line list
 // Line input
 
 BOOL read_cmdfile( PCSTR );		// read the file
-BOOL get_file_line( void );		// read the line from file
+BOOL get_file_line( BOOL );		// read the line from file
 void get_next_line( void );		// get next line of input
 void get_macro_line( void );		// input coming from a macro
 void pop_macro( void ); 		// macro finished, remove it from stack
@@ -2064,7 +2071,7 @@ void write_history( void )
 {
   PHistory h;
 
-  file = fopen( hstname, "wb" );
+  FILE* file = fopen( local.hstname, "wb" );
   if (file == NULL)
     return;
 
@@ -2074,13 +2081,12 @@ void write_history( void )
     fwrite( h->line, WSZ(h->len), 1, file );
   }
   fclose( file );
-  file = NULL;
 }
 
 
 void read_history( void )
 {
-  file = fopen( hstname, "rb" );
+  FILE* file = fopen( local.hstname, "rb" );
   if (file == NULL)
     return;
 
@@ -2103,7 +2109,6 @@ void read_history( void )
     free( line.txt );
 
   fclose( file );
-  file = NULL;
 }
 
 
@@ -2671,7 +2676,9 @@ void make_relative( PWSTR path, PWSTR rel )
 // will be added to the history.
 BOOL read_cmdfile( PCSTR name )
 {
-  BOOL rc = FALSE;
+  BOOL	rc = FALSE;
+  BOOL	skip, cond;
+  WCHAR cwd[MAX_PATH];
 
   kbd = FALSE;
   file = fopen( name, "r" );
@@ -2680,8 +2687,49 @@ BOOL read_cmdfile( PCSTR name )
     file_name = name;
     line.txt = NULL;
     max = 0;
-    while (get_file_line())
+    skip = cond = FALSE;
+    GetCurrentDirectoryW( MAX_PATH, cwd );
+    while (get_file_line( skip ))
     {
+      if (*line.txt == '#')
+      {
+	if (cond)
+	  break;
+	line.txt[line.len] = '\0';
+	skip = (_wcsicmp( line.txt + 1, cwd ) != 0);
+	if (!skip)
+	{
+	  int c = getc( file );
+	  if (c == '=')
+	  {
+	    char  tmp[MAX_PATH];
+	    char* h = tmp;
+	    while ((c = getc( file )) != '\n' && c != EOF)
+	    {
+	      if (h < tmp + sizeof(tmp) - 1)
+		*h++ = c;
+	    }
+	    *h = '\0';
+	    h = strrchr( name, '\\' );
+	    if (h)
+	    {
+	      c = *++h;
+	      *h = '\0';
+	      SetCurrentDirectory( name );
+	      *h = c;
+	    }
+	    GetFullPathName( tmp, sizeof(local.hstname), local.hstname, NULL );
+	    SetCurrentDirectoryW( cwd );
+	    save_history = TRUE;
+	    execute_rsth( 0 );
+	    read_history();
+	  }
+	  else
+	    ungetc( c, file );
+	  cond = TRUE;
+	}
+	continue;
+      }
       if (!internal_cmd())
 	add_to_history();
     }
@@ -2702,8 +2750,8 @@ BOOL read_cmdfile( PCSTR name )
 
 
 // Read a line from the file.  Blank lines and lines starting with '-' are
-// ignored.
-BOOL get_file_line( void )
+// ignored.  If skip is TRUE, lines are skipped until the next '#'.
+BOOL get_file_line( BOOL skip )
 {
   char buf[1024];
 
@@ -2724,7 +2772,7 @@ BOOL get_file_line( void )
       line.len = 0;
       return FALSE;
     }
-  } while (*buf == '\n' || *buf == '-');
+  } while (*buf == '\n' || *buf == '-' || (skip && *buf != '#'));
 
   line.len = MultiByteToWideChar( CP_OEMCP, 0, buf, -1, NULL, 0 );
   if (line.len > max)
@@ -2747,7 +2795,7 @@ void get_next_line( void )
   line.len = 0;
   kbd = FALSE;
   if (file)
-    get_file_line();
+    get_file_line( FALSE );
   else if (macro_stk)
     get_macro_line();
   else if (mcmd.txt)
@@ -4693,13 +4741,13 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 
   if (option.disable_cmdkey)
   {
-    enabled ^= TRUE;			// only disable this instance
+    local.enabled ^= TRUE;		// only disable this instance
     option.disable_cmdkey = 0;
   }
 
   hConIn  = hConsoleInput;
   hConOut = GetStdHandle( STD_OUTPUT_HANDLE );
-  if (enabled && nNumberOfCharsToRead > 1 &&
+  if (local.enabled && nNumberOfCharsToRead > 1 &&
       GetConsoleMode( hConIn, &mode ) &&
       HIWORD( &lpBuffer ) != HIWORD( lpBuffer ) &&	// avoid SET /P
       GetConsoleScreenBufferInfo( hConOut, &screen ))
@@ -4754,6 +4802,15 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     {
       read_cmdfile( cmdname );
       *cmdname = 0;
+    }
+
+    if (*hstname)
+    {
+      if (*hstname == '-' && hstname[1] == '\0')
+	*local.hstname = '\0';
+      else
+	strcpy( local.hstname, hstname );
+      *hstname = '\0';
     }
 
     line.txt = lpBuffer;
@@ -5042,8 +5099,22 @@ BOOL ReadOptions( HKEY root )
       option.base_col = option.dir_col;
     exist = sizeof(cfgname);
     RegQueryValueEx( key, "Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
-    exist = sizeof(hstname);
-    RegQueryValueEx( key, "Hstfile", NULL, NULL, (LPBYTE)hstname, &exist );
+    RegCloseKey( key );
+    return TRUE;
+  }
+  return FALSE;
+}
+
+
+BOOL ReadHistoryName( HKEY root )
+{
+  HKEY	key;
+  DWORD exist;
+
+  if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
+  {
+    exist = sizeof(local.hstname);
+    RegQueryValueEx( key, "Hstfile", NULL, NULL, (LPBYTE)local.hstname, &exist );
     RegCloseKey( key );
     return TRUE;
   }
@@ -5066,10 +5137,8 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
     case DLL_PROCESS_ATTACH:
       // Don't bother hooking into CMDkey.
       if (lpReserved)			// static initialisation
-      {
-	is_enabled = enabled;		// let status know the state
 	break;
-      }
+
       bResult = HookAPIOneMod( GetModuleHandle( NULL ), Hooks );
       if (bResult && !installed)
       {
@@ -5079,22 +5148,30 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
       }
       if (installed)
       {
+	// This is rather awkward.  I want to read the config file first, then
+	// the history.  But history lines in the config should have precedence
+	// over the saved history, so I need to read the saved history first.
+	// Specifying another history in the config will reset this one.
 	if (!is_primary)
 	{
-	  primary = is_primary = TRUE;
+	  if (!ReadHistoryName( HKEY_CURRENT_USER ))
+	    ReadHistoryName( HKEY_LOCAL_MACHINE );
 	  read_history();
 	}
 	if (*cfgname)
 	  read_cmdfile( cfgname );
+	if (!is_primary && !save_history)
+	  save_history = primary = is_primary = TRUE;
 	SetConsoleCtrlHandler( (PHANDLER_ROUTINE)ctrl_break, TRUE );
       }
     break;
 
     case DLL_PROCESS_DETACH:
-      if (primary)
+      if (save_history)
       {
-	is_primary = FALSE;
 	write_history();
+	if (primary)
+	  is_primary = FALSE;
       }
     break;
   }

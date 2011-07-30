@@ -35,4 +35,12 @@ typedef struct
 } Option;
 
 
+typedef struct
+{
+  int  version;
+  char enabled; 		// is this instance active?
+  char hstname[MAX_PATH];	// the history file
+} Status;
+
+
 #define REGKEY "Software\\Adoxa\\CMDkey"

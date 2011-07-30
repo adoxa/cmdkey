@@ -9,19 +9,13 @@ CFLAGS = -Wall -O2
 %.exe: %.o %v.o
 	$(CC) $+ edit.a -s -o $@
 
-all: edit.dll cmdkey.exe cmdkeynt.exe
+all: edit.dll cmdkey.exe
 
 edit.dll: edit.o editv.o
 	$(CC) $+ -mdll -s -o $@ -lcomdlg32 -Wl,--out-implib,$(basename $@).a
 
-edit.o: edit.c cmdkey.h
-cmdkey.o: cmdkey.c cmdkey.h
+edit.o: edit.c cmdkey.h version.h
+cmdkey.o: cmdkey.c cmdkey.h version.h
 
-cmdkeynt.o: cmdkey.c cmdkey.h
-	$(CC) $(CFLAGS) -DNT4 -c $< -o $@
-
-editv.o: edit.rc
-cmdkeyv.o: cmdkey.rc
-
-cmdkeyntv.o: cmdkey.rc
-	windres -DNT4 $< $@
+editv.o: edit.rc version.h
+cmdkeyv.o: cmdkey.rc version.h

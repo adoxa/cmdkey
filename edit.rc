@@ -5,10 +5,11 @@
 */
 
 #include <winver.h>
+#include "version.h"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION	1,1,0,0
-PRODUCTVERSION	1,1,0,0
+FILEVERSION	PVERB
+PRODUCTVERSION	PVERB
 FILEOS		VOS_NT
 FILETYPE	VFT_DLL
 {
@@ -19,12 +20,12 @@ FILETYPE	VFT_DLL
       VALUE "Comments",         "http://cmdkey.adoxa.cjb.net/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
-      VALUE "FileVersion",      "1.10"
+      VALUE "FileVersion",      PVERS
       VALUE "InternalName",     "edit"
       VALUE "LegalCopyright",   "Freeware"
       VALUE "OriginalFilename", "edit.dll"
       VALUE "ProductName",      "CMDkey"
-      VALUE "ProductVersion",   "1.10"
+      VALUE "ProductVersion",   PVERS
     }
   }
 

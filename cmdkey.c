@@ -11,25 +11,18 @@
   + add -I/-U to use HKLM.
 */
 
-#define PVERS "1.10"
-#define PDATE "28 July, 2011"
-
-// Uncomment the below when using NT, which doesn't have the tool help library.
-// This means I can't (easily) find the parent process, so it starts a new
-// instance of CMD with -i and assumes installed without it.
-//#define NT4
+#define PDATE "30 July, 2011"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
 #include <windows.h>
-#ifndef NT4
 #include <tlhelp32.h>
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include "cmdkey.h"
+#include "version.h"
 
 #ifndef offsetof
 # define offsetof(type, member) (size_t)(&(((type*)0)->member))
@@ -47,20 +40,19 @@ int _CRT_glob = 0;
 void status( void );
 void help( void );
 
-#ifndef NT4
 BOOL  find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32, LPPROCESSENTRY32 );
 DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo );
 BOOL  IsInstalled( DWORD id );
-#endif
+void  GetStatus( DWORD );
 void  Inject( LPPROCESS_INFORMATION pinfo );
 
 
 BOOL   installed	 __attribute__((dllimport));
-BOOL   is_enabled	 __attribute__((dllimport));
 Option option		 __attribute__((dllimport));
 char   cfgname[MAX_PATH] __attribute__((dllimport));
 char   cmdname[MAX_PATH] __attribute__((dllimport));
 char   hstname[MAX_PATH] __attribute__((dllimport));
+Status local		 __attribute__((dllimport));
 
 
 int main( int argc, char* argv[] )
@@ -79,38 +71,33 @@ int main( int argc, char* argv[] )
   BOOL	 hstfile;
   UCHAR* colour = NULL;
   int	 j;
-#ifndef NT4
   DWORD  len, type;
   char*  cmdpos;
-#endif
 
-  if (argc > 1 &&
-      (strcmp( argv[1], "--help" ) == 0 ||
-       ((argv[1][0] == '-' || argv[1][0] == '/') && argv[1][1] == '?')))
+  if (argc > 1)
   {
-    help();
-    return 0;
+    if (strcmp( argv[1], "--help" ) == 0 ||
+	((argv[1][0] == '-' || argv[1][0] == '/') && argv[1][1] == '?'))
+    {
+      help();
+      return 0;
+    }
+    if (strcmp( argv[1], "--version" ) == 0)
+    {
+      puts( "CMDkey version " PVERS " (" PDATE ")." );
+      return 0;
+    }
   }
 
-#ifdef NT4
-  if (argc == 1)
-  {
-    status();
-    return 0;
-  }
-  update = FALSE;
-  active = TRUE;
-  fname  = "";
-#else
   active = IsInstalled( GetParentProcessInfo( &pinfo ) );
   if (active && argc == 1)
   {
+    GetStatus( pinfo.dwProcessId );
     status();
     return 0;
   }
   update = (!installed && argc > 1);
   fname = (active) ? cmdname : cfgname;
-#endif
   root = HKEY_CURRENT_USER;
   hstfile = FALSE;
 
@@ -243,7 +230,6 @@ int main( int argc, char* argv[] )
 	  case 'i':
 	    if (*arg == 'I')
 	      root = HKEY_LOCAL_MACHINE;
-#ifndef NT4
 	    len = GetModuleFileName( NULL, cmdkey + 2, sizeof(cmdkey) - 3 ) + 3;
 	    strlwr( cmdkey + 2 );
 	    cmdkey[0] = '&';
@@ -277,16 +263,12 @@ int main( int argc, char* argv[] )
 	    RegCloseKey( key );
 	    free( opt );
 	    opt = NULL;
-#else
-	    active = FALSE;
-#endif
 	    update = TRUE;
 	  break;
 
 	  case 'u':
 	    if (*arg == 'U')
 	      root = HKEY_LOCAL_MACHINE;
-#ifndef NT4
 	    // Remove CMDkey from CMD.EXE's AutoRun setting.
 	    len = GetModuleFileName( NULL, cmdkey + 1, sizeof(cmdkey) - 2 ) + 2;
 	    strlwr( cmdkey + 1 );
@@ -325,7 +307,6 @@ int main( int argc, char* argv[] )
 	    }
 	    RegCloseKey( key );
 	    active = TRUE;
-#endif
 	  break;
 
 	  case 'f':
@@ -356,11 +337,7 @@ int main( int argc, char* argv[] )
 	return 1;
       }
       fclose( tmp );
-#ifdef NT4
-      fname = argv[j];
-#else
       strcpy( fname, argv[j] );
-#endif
     }
   }
   if (update)
@@ -369,7 +346,6 @@ int main( int argc, char* argv[] )
       GetFullPathName( hstname, sizeof(hstname), hstname, NULL );
     if (*fname)
       GetFullPathName( fname, sizeof(cfgname), cfgname, NULL );
-#ifndef NT4
     else if (!installed)
     {
       // Let's just assume it ends with ".exe".
@@ -379,46 +355,38 @@ int main( int argc, char* argv[] )
       {
 	memcpy( hstname, cfgname, j );
 	strcpy( hstname + j, "hst" );
+	hstfile = TRUE;
       }
     }
-#endif
 
     RegCreateKeyEx( root, REGKEY, 0, "", REG_OPTION_NON_VOLATILE,
 		    KEY_ALL_ACCESS, NULL, &key, &exist );
     RegSetValueEx( key, "Options", 0, REG_BINARY, (LPBYTE)&option, sizeof(option) );
     RegSetValueEx( key, "Cmdfile", 0, REG_SZ, (LPBYTE)cfgname, strlen( cfgname ) + 1 );
-    RegSetValueEx( key, "Hstfile", 0, REG_SZ, (LPBYTE)hstname, strlen( hstname ) + 1 );
+    if (hstfile)
+      RegSetValueEx( key, "Hstfile", 0, REG_SZ, (LPBYTE)hstname, strlen( hstname ) + 1 );
     RegCloseKey( key );
+  }
+  else if (hstfile)
+  {
+    if (*hstname)
+      GetFullPathName( hstname, sizeof(hstname), hstname, NULL );
+    else
+    {
+      *hstname = '-';
+      hstname[1] = '\0';
+    }
   }
 
   if (!active)
   {
-#ifndef NT4
-    pinfo.hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE,
-				  pinfo.dwProcessId );
+    pinfo.hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE, pinfo.dwProcessId );
     pinfo.hThread = OpenThread( THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
 				THREAD_SET_CONTEXT, FALSE, pinfo.dwThreadId );
     SuspendThread( pinfo.hThread );
     Inject( &pinfo );
     CloseHandle( pinfo.hThread );
     CloseHandle( pinfo.hProcess );
-#else
-    STARTUPINFO sinfo;
-    if (GetEnvironmentVariable( "ComSpec", cmdkey, sizeof(cmdkey) ) == 0)
-      strcpy( cmdkey, "CMD.EXE" );
-    ZeroMemory( &sinfo, sizeof(sinfo) );
-    sinfo.cb = sizeof(sinfo);
-    if (CreateProcess( NULL, cmdkey, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL,
-		       NULL, &sinfo, &pinfo ))
-    {
-      Inject( &pinfo );
-      WaitForSingleObject( pinfo.hProcess, INFINITE );
-    }
-  }
-  else if (*fname)
-  {
-    strcpy( cmdname, fname );
-#endif
   }
 
   return 0;
@@ -432,15 +400,28 @@ void status( void )
   char name[MAX_PATH+2];
   char hst[MAX_PATH+8];
 
+  if (local.version != PVERX)
+  {
+    printf( "This CMDkey is version %x.%.2x, but installed edit.dll is ",
+	    PVERX >> 8, PVERX & 0xFF );
+    if (local.version >= 0x102)
+      printf( "%x.%.2x.\n", local.version >> 8, local.version & 0xFF );
+    else if (local.version == 0x101)
+      puts( "1.00 or 1.01." );
+    else
+      puts( "unknown." );
+    return;
+  }
+
   if (option.histsize)
     itoa( option.histsize, buf, 10 );
   else
     strcpy( buf, "all" );
 
-  if (*hstname)
-    sprintf( hst, "file: \"%s\"", hstname );
+  if (*local.hstname)
+    sprintf( hst, "\"%s\"", local.hstname );
   else
-    strcpy( hst, "is not persistent" );
+    strcpy( hst, "none" );
 
   if (*cfgname)
     sprintf( name, "\"%s\"", cfgname );
@@ -458,8 +439,8 @@ void status( void )
 	  "* Ignore character is '%c'.\n"
 	  "* Minimum history line length is %d.\n"
 	  "* History will remember %s lines.\n"
-	  "* History %s.\n"
-	  "* Default configuration file: %s.\n"
+	  "* History file: %s.\n"
+	  "* Configuration file: %s.\n"
 	  "* CMDkey is %sabled.\n",
 	  (option.overwrite) ? "Overwrite" : "Insert",
 	  option.cursor_size[0], option.cursor_size[1],
@@ -473,12 +454,10 @@ void status( void )
 	  buf,
 	  hst,
 	  name,
-	  (is_enabled) ? "en" : "dis"
+	  (local.enabled) ? "en" : "dis"
 	);
 }
 
-
-#ifndef NT4
 
 // Search each process in the snapshot for id.
 BOOL find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32 pe,
@@ -577,7 +556,22 @@ BOOL IsInstalled( DWORD id )
   return fOk;
 }
 
-#endif
+
+// Read the local variables from the parent process.
+void GetStatus( DWORD id )
+{
+  HANDLE parent = OpenProcess( PROCESS_VM_READ, FALSE, id );
+  if (parent)
+  {
+    if (!ReadProcessMemory( parent, &local, &local, sizeof(local), NULL ))
+      local.version = 0x101;
+    else if (local.version == 0x64616552)
+      local.version = 0x102;
+    CloseHandle( parent );
+  }
+  else
+    local.version = 0;
+}
 
 
 struct InjectData
@@ -652,24 +646,15 @@ void Inject( LPPROCESS_INFORMATION pinfo )
 void help( void )
 {
   puts(
-  "CMDkey "
-#ifdef NT4
-  "(NT) "
-#endif
-  "by Jason Hood <jadoxa@yahoo.com.au>.\n"
-  "Version "PVERS" ("PDATE").  Freeware.\n"
+  "CMDkey by Jason Hood <jadoxa@yahoo.com.au>.\n"
+  "Version " PVERS " (" PDATE ").  Freeware.\n"
   "http://cmdkey.adoxa.cjb.net/\n"
   "\n"
   "Provide enhanced command line editing for CMD.EXE.\n"
   "\n"
   "cmdkey [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
   "       [-kcCMD] [-kmSEL] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
-  "       [-f[HISTFILE]] [CFGFILE] "
-#ifdef NT4
-  "[-i]\n"
-#else
-  "[-iu]\n"
-#endif
+  "       [-f[HISTFILE]] [CFGFILE] [-iu]\n"
   "\n"
   "    -b\t\tdisable backslash appending for completed directories\n"
   "    -c\t\tswap insert and overwrite cursors, or set their size\n"
@@ -696,19 +681,13 @@ void help( void )
   "    BASE\tcolour of the prompt's base directory\n"
   "    GT\t\tcolour of the prompt's greater-than sign\n"
   "\n"
-#ifdef NT4
-  "    -i\t\tinstall (run new instance of CMD.EXE and make the current\n"
-  "      \t\toptions the default)\n"
-  "\n"
-  "CMDkey with no arguments will display the status (it assumes it is running).\n"
-#else
   "    -i\t\tinstall (add to CMD's AutoRun registry entry and make the\n"
   "      \t\tcurrent options the default)\n"
   "    -u\t\tuninstall (remove from AutoRun)\n"
+  "    -I -U\tuse local machine instead of current user\n"
   "\n"
   "CMDkey with no arguments will either install itself into the current CMD.EXE or\n"
   "display the status of the already running instance.\n"
-#endif
   "When CMDkey is already running options -begkort_ will toggle the current state;\n"
   "prefix them with '+' to explicitly turn on (set behaviour indicated above) or\n"
   "with '-' to turn off (set default behaviour).  Eg: \"cmdkey -+b-g\" will disable\n"
