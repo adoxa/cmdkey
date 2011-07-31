@@ -1200,6 +1200,11 @@ void edit_line( void )
       break;
 
       case DelLeft:
+	if (markpos != ~0)
+	{
+	  remove_chars( pos = markbeg, markend - markbeg );
+	  break;
+	}
 	if (pos > 0)
 	{
 	  --pos;
@@ -1225,6 +1230,11 @@ void edit_line( void )
       break;
 
       case DelRight:
+	if (markpos != ~0)
+	{
+	  remove_chars( pos = markbeg, markend - markbeg );
+	  break;
+	}
 	if (pos < line.len)
 	  remove_chars( pos, 1 );
       break;
