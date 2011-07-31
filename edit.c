@@ -195,6 +195,7 @@ BOOL	found_quote;		// true if get_string found a quote
 BOOL	macro_arg;		// true for get_string to find a macro argument
 
 FILE*	file;			// file containing commands
+UINT	filecp; 		// code page of the file
 PCSTR	file_name;		// name of the file for the error display
 int	line_no;		// line number of current command
 BOOL	seen_error;		// has an error already been shown?
@@ -2724,6 +2725,14 @@ BOOL read_cmdfile( PCSTR name )
   file = fopen( name, "r" );
   if (file != NULL)
   {
+    // Check for the UTF-8 byte-order mark.
+    if (getc( file ) == 0xEF && getc( file ) == 0xBB && getc( file ) == 0xBF)
+      filecp = CP_UTF8;
+    else
+    {
+      rewind( file );
+      filecp = CP_OEMCP;
+    }
     file_name = name;
     line.txt = NULL;
     max = 0;
@@ -2814,13 +2823,13 @@ BOOL get_file_line( BOOL skip )
     }
   } while (*buf == '\n' || *buf == '-' || (skip && *buf != '#'));
 
-  line.len = MultiByteToWideChar( CP_OEMCP, 0, buf, -1, NULL, 0 );
+  line.len = MultiByteToWideChar( filecp, 0, buf, -1, NULL, 0 );
   if (!make_line( line.len ))
   {
     make_line( ~0 );
     return FALSE;
   }
-  MultiByteToWideChar( CP_OEMCP, 0, buf, -1, line.txt, line.len );
+  MultiByteToWideChar( filecp, 0, buf, -1, line.txt, line.len );
 
   line.len -= 2;			// discount LF and NUL
   return TRUE;
