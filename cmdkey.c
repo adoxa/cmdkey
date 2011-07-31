@@ -11,7 +11,7 @@
   + add -I/-U to use HKLM.
 */
 
-#define PDATE "30 July, 2011"
+#define PDATE "31 July, 2011"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -48,6 +48,7 @@ void  Inject( LPPROCESS_INFORMATION pinfo );
 
 
 BOOL   installed	 __attribute__((dllimport));
+DWORD  parent_pid	 __attribute__((dllimport));
 Option option		 __attribute__((dllimport));
 char   cfgname[MAX_PATH] __attribute__((dllimport));
 char   cmdname[MAX_PATH] __attribute__((dllimport));
@@ -504,6 +505,7 @@ DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo )
     puts( "CMDkey: could not find my parent's process ID." );
     exit( 1 );
   }
+  parent_pid = pe.th32ParentProcessID;
 
   te.dwSize = sizeof(te);
   for (fOk = Thread32First( hSnap, &te ); fOk; fOk = Thread32Next( hSnap, &te ))

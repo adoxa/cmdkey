@@ -55,8 +55,9 @@ FWriteConsoleW pWriteConsoleW;
 
 #define SHARED __attribute__((dllexport, shared, section(".share")))
 
-BOOL SHARED installed  = FALSE;
-BOOL SHARED is_primary = FALSE;
+BOOL  SHARED installed	= FALSE;
+BOOL  SHARED is_primary = FALSE;
+DWORD SHARED parent_pid = 0;
 
 Option SHARED option = {
   { 25, 50 },			// insert & overwrite cursor sizes
@@ -640,9 +641,10 @@ int	 histsize;				// number of lines in history
 
 PHistory new_history( PCWSTR, DWORD );		// allocate new history item
 void	 remove_from_history( PHistory );	// remove item from history
-void	 add_to_history( void );		// add current line to history
+void	 add_to_history( BOOL );		// add current line to history
 PHistory search_history( PHistory, DWORD, BOOL ); // search history for match
 PHistory find_history( PHistory, int*, DWORD, BOOL );
+void	 copy_parent_history( void );		// initial history from parent
 
 
 // Filename completion
@@ -673,6 +675,7 @@ void  make_relative( PWSTR, PWSTR ); // make an absolute path relative
 int   search_cfg( PCWSTR, DWORD, const Cfg [], int ); // find config string
 char* find_key( DWORD, DWORD ); 	// find the position of a key
 PWSTR new_txt( PCWSTR, DWORD ); 	// make a copy of a string
+BOOL  make_line( DWORD );		// ensure line is a particular length
 void  bell( void );			// audible alert
 DWORD skip_blank( DWORD );		// skip over spaces and tabs
 DWORD skip_nonblank( DWORD );		// skip over everything not space/tab
@@ -1278,7 +1281,7 @@ void edit_line( void )
       break;
 
       case StoreErase:
-	add_to_history();
+	add_to_history( TRUE );
 	hist = &history;
 
       case Erase:
@@ -1294,7 +1297,7 @@ void edit_line( void )
 	line.len = pos;
 
       case Enter:
-	add_to_history();
+	add_to_history( TRUE );
 	done = TRUE;
       break;
 
@@ -1305,7 +1308,7 @@ void edit_line( void )
 	  Line temp = line;
 	  line.txt = hist->line;
 	  line.len = hist->len;
-	  add_to_history();
+	  add_to_history( TRUE );
 	  line = temp;
 	}
 	done = TRUE;
@@ -1988,18 +1991,20 @@ void remove_from_history( PHistory h )
 }
 
 
-// Add the line to the history.  If the line already exists (matched case
-// sensitively), just move it to the front.
-void add_to_history( void )
+// Add the line to the history.  If search is true and the line already exists
+// (matched case sensitively), just move it to the front.
+void add_to_history( BOOL search )
 {
   PHistory h;
 
   if (line.len < option.min_length)	// line is too small to be remembered
     return;
 
-  for (h = history.prev; h != &history; h = h->prev)
-    if (h->len == line.len && memcmp( h->line, line.txt, WSZ(line.len) ) == 0)
-      break;
+  h = &history;
+  if (search)
+    while ((h = h->prev) != &history)
+      if (h->len == line.len && memcmp( h->line, line.txt, WSZ(line.len) ) == 0)
+	break;
 
   if (h == &history)			// not already present
   {
@@ -2075,6 +2080,39 @@ PHistory find_history( PHistory hist, int* pos, DWORD len, BOOL back )
 }
 
 
+// Create the initial history from the parent process' history.
+void copy_parent_history( void )
+{
+  HANDLE   parent;
+  int	   version;
+  History  hist;
+  PHistory cur;
+
+  parent = OpenProcess( PROCESS_VM_READ, FALSE, parent_pid );
+  if (!parent)
+    return;
+
+  if (ReadProcessMemory( parent, &local, &version, sizeof(int), NULL ) &&
+      version == PVERX)
+  {
+    make_line( 0 );
+    ReadProcessMemory( parent, &history, &hist, sizeof(History), NULL );
+    while (hist.next != &history)
+    {
+      cur = hist.next;
+      ReadProcessMemory( parent, cur, &hist, sizeof(History), NULL );
+      if (!make_line( hist.len ))
+	break;
+      ReadProcessMemory( parent, cur + 1, line.txt, WSZ(line.len), NULL );
+      add_to_history( FALSE );
+    }
+    make_line( ~0 );
+  }
+
+  CloseHandle( parent );
+}
+
+
 // Write the history to file.  Since editing this file is not really needed,
 // keep it simple and write it as binary.
 void write_history( void )
@@ -2100,23 +2138,15 @@ void read_history( void )
   if (file == NULL)
     return;
 
-  line.txt = NULL;
-  max = 0;
+  make_line( 0 );
   while (fread( &line.len, 2, 1, file ) == 1)
   {
-    if (line.len > max)
-    {
-      PWSTR tmp = realloc( line.txt, WSZ(line.len) );
-      if (tmp == NULL)
-	break;
-      line.txt = tmp;
-      max = line.len;
-    }
+    if (!make_line( line.len ))
+      break;
     fread( line.txt, WSZ(line.len), 1, file );
-    add_to_history();
+    add_to_history( FALSE );
   }
-  if (line.txt != NULL)
-    free( line.txt );
+  make_line( ~0 );
 
   fclose( file );
 }
@@ -2741,7 +2771,7 @@ BOOL read_cmdfile( PCSTR name )
 	continue;
       }
       if (!internal_cmd())
-	add_to_history();
+	add_to_history( TRUE );
     }
     if (seen_error)
     {
@@ -2785,12 +2815,10 @@ BOOL get_file_line( BOOL skip )
   } while (*buf == '\n' || *buf == '-' || (skip && *buf != '#'));
 
   line.len = MultiByteToWideChar( CP_OEMCP, 0, buf, -1, NULL, 0 );
-  if (line.len > max)
+  if (!make_line( line.len ))
   {
-    line.txt = realloc( line.txt, WSZ(line.len) );
-    if (line.txt == NULL)
-      return FALSE;
-    max = line.len;
+    make_line( ~0 );
+    return FALSE;
   }
   MultiByteToWideChar( CP_OEMCP, 0, buf, -1, line.txt, line.len );
 
@@ -4496,6 +4524,37 @@ PWSTR new_txt( PCWSTR txt, DWORD len )
 }
 
 
+// Ensure the line is long enough for the length.  If len is 0, initialise; if
+// ~0, clean up.
+BOOL make_line( DWORD len )
+{
+  if (len == 0)
+  {
+    line.txt = NULL;
+    max = 0;
+  }
+  else if (len == ~0)
+  {
+    if (line.txt != NULL)
+    {
+      free( line.txt );
+      line.txt = NULL;
+    }
+    len = 0;
+  }
+  else if (len > max)
+  {
+    PWSTR tmp = realloc( line.txt, WSZ(len) );
+    if (tmp == NULL)
+      return FALSE;
+    line.txt = tmp;
+    max = len;
+  }
+  line.len = len;
+  return TRUE;
+}
+
+
 // Make a sound if it's not in silent mode.
 void bell( void )
 {
@@ -5172,6 +5231,8 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
 	  read_cmdfile( cfgname );
 	if (!is_primary && !save_history)
 	  save_history = primary = is_primary = TRUE;
+	if (!save_history)
+	  copy_parent_history();
 	SetConsoleCtrlHandler( (PHANDLER_ROUTINE)ctrl_break, TRUE );
       }
     break;
