@@ -161,6 +161,21 @@ typedef struct history_s
 typedef void (*IntFunc( DWORD ));
 
 
+// Structure for undo/redo.
+typedef struct undo_s
+{
+  struct undo_s* prev;
+  struct undo_s* next;
+  int	 type;			// the operation to perform
+  int	 pos;			// where to perform it
+  DWORD  len;			// how much to undo
+  DWORD  max;			// capacity of txt
+  PWSTR  txt;			// the text to restore
+} UndoInfo, *PUndoInfo;
+
+enum { UNDOGROUP, UNDOINSERT, UNDODELETE };	// how to undo
+
+
 BOOL	primary;		// are we the primary instance?
 BOOL	save_history;		// preserve history?
 
@@ -322,6 +337,9 @@ enum
   InsOvr,		// insert/overwrite toggle
   Play, 		// play back a series of keys
   Record,		// record a series of keys
+  Undo, 		// undo previous function(s)
+  Redo, 		// undo the undo
+  Revert,		// undo/redo everything
   LastFunc
 };
 
@@ -338,7 +356,7 @@ const char const * func_str[] =
   "DelWordRight", "DelArg", "DelBegLine", "DelEndLine", "DelEndExec", "Erase",
   "StoreErase", "CmdSep", "Transpose", "SwapWords", "SwapArgs", "AutoRecall",
   "MacroToggle", "UnderToggle", "VarSubst", "Enter", "Execute", "Wipe",
-  "InsOvr", "Play", "Record",
+  "InsOvr", "Play", "Record", "Undo", "Redo", "Revert"
 };
 
 
@@ -387,6 +405,8 @@ const Cfg cfg[] = {
   f( PrevLine	  )
   f( Quote	  )
   f( Record	  )
+  f( Redo	  )
+  f( Revert	  )
   f( SearchBack   )
   f( SearchForw   )
   f( Select	  )
@@ -398,6 +418,7 @@ const Cfg cfg[] = {
   f( SwapWords	  )
   f( Transpose	  )
   f( UnderToggle  )
+  f( Undo	  )
   f( VarSubst	  )
   f( Wipe	  )
   f( WordLeft	  )
@@ -498,12 +519,12 @@ char ctrl_key_table[][2] = {
   { SearchBack, 	FindBack,	}, // ^R
   { CmdSep,		SelectFiles,	}, // ^S
   { Transpose,		SwapWords,	}, // ^T
-  { PrevLine,		Ignore, 	}, // ^U
+  { PrevLine,		Revert, 	}, // ^U
   { SearchForw, 	FindForw,	}, // ^V
   { DelWordRight,	Ignore, 	}, // ^W
   { DelBegLine, 	Ignore, 	}, // ^X
   { AutoRecall, 	Ignore, 	}, // ^Y
-  { Default,		Ignore, 	}, // ^Z
+  { Undo,		Redo,		}, // ^Z
   { Erase,		Ignore, 	}, // ^[
   { CycleDir,		CycleDirBack,	}, // ^\ (dumb GCC)
   { CmdSep,		Ignore, 	}, // ^]
@@ -596,6 +617,16 @@ void  display_prompt( void );		// re-display the original prompt
 void  remove_prompt( void );		// wipe out the prompt
 
 
+// Undo
+
+UndoInfo  undo, redo;			// fixed head of each list
+PUndoInfo undoing;			// pointer to the current list
+
+void reset_undo( void );		// "erase" both lists
+void add_to_undo( int, DWORD, DWORD );	// add an operation to the current list
+BOOL undo_redo( PUndoInfo, int* );	// undo/redo a group
+
+
 // Definitions (macro, symbol and association)
 
 PDefine sym_head, mac_head, assoc_head; 	// heads of the various lists
@@ -677,6 +708,7 @@ int   search_cfg( PCWSTR, DWORD, const Cfg [], int ); // find config string
 char* find_key( DWORD, DWORD ); 	// find the position of a key
 PWSTR new_txt( PCWSTR, DWORD ); 	// make a copy of a string
 BOOL  make_line( DWORD );		// ensure line is a particular length
+BOOL  make_length( PWSTR*, DWORD*, DWORD );
 void  bell( void );			// audible alert
 DWORD skip_blank( DWORD );		// skip over spaces and tabs
 DWORD skip_nonblank( DWORD );		// skip over everything not space/tab
@@ -728,6 +760,7 @@ void copy_chars( PCWSTR str, DWORD cnt )
   memcpy( line.txt, str, WSZ(cnt) );
   line.len = cnt;
   set_display_marks( 0, line.len );
+  reset_undo();
 }
 
 
@@ -735,6 +768,7 @@ void copy_chars( PCWSTR str, DWORD cnt )
 void remove_chars( DWORD pos, DWORD cnt )
 {
   set_display_marks( pos, line.len );
+  add_to_undo( UNDOINSERT, pos, cnt );
   memcpy( line.txt + pos, line.txt + pos + cnt, WSZ(line.len - pos - cnt) );
   line.len -= cnt;
 }
@@ -752,6 +786,7 @@ DWORD insert_chars( DWORD pos, PCWSTR str, DWORD cnt )
   memcpy( line.txt + pos, str, WSZ(cnt) );
   line.len += cnt;
   set_display_marks( pos, line.len );
+  add_to_undo( UNDODELETE, pos, cnt );
   return cnt;
 }
 
@@ -762,17 +797,205 @@ DWORD replace_chars( DWORD pos, DWORD old, PCWSTR str, DWORD cnt )
   if (old >= cnt)
   {
     set_display_marks( pos, pos + cnt );
+    add_to_undo( UNDOINSERT, pos, cnt );
     memcpy( line.txt + pos, str, WSZ(cnt) );
     if (old != cnt)
       remove_chars( pos + cnt, old - cnt );
+    add_to_undo( UNDODELETE, pos, cnt );
   }
   else
   {
     set_display_marks( pos, pos + old );
+    add_to_undo( UNDOINSERT, pos, old );
+    add_to_undo( UNDODELETE, pos, old );
     memcpy( line.txt + pos, str, WSZ(old) );
     cnt = old + insert_chars( pos + old, str + old, cnt - old );
   }
   return cnt;
+}
+
+
+// Reset the undo/redo pointers, making empty lists.
+void reset_undo()
+{
+  undo.prev = &undo;
+  redo.prev = &redo;
+  undoing = &undo;
+}
+
+
+// Add an operation to the current list, consolidating where possible.
+void add_to_undo( int type, DWORD pos, DWORD len )
+{
+  PUndoInfo u = undoing->prev;
+
+  if (type == UNDOGROUP)
+  {
+    // UNDOGROUP is used to store the cursor position, so since movement is
+    // not undone, the item can be reused.
+    if (u->type == UNDOGROUP && u->prev != u)
+    {
+      u->pos = pos;
+      return;
+    }
+  }
+  else
+  {
+    if (len == 0)
+      return;
+    switch (u->type)
+    {
+      case UNDODELETE:
+	switch (type)
+	{
+	  case UNDODELETE:
+	    // Deleting after a previous delete increases it.  E.g.: typing the
+	    // three characters "abc" combines to one three-character delete.
+	    if (u->pos + u->len == pos)
+	    {
+	      u->len += len;
+	      return;
+	    }
+	  break;
+
+	  case UNDOINSERT:
+	    // Inserting characters that just get deleted can be removed.  This
+	    // occurs with file name completion.  E.g.: start with nothing and
+	    // complete "123" (so undo deletes 3), then replace with "abc".
+	    // Replace is insert (to restore "123") and delete (to remove
+	    // "abc").  The first delete and second insert cancel each other
+	    // out, leaving the second delete (delete "abc" to nothing).
+	    if (pos == u->pos && len <= u->len)
+	    {
+	      u->len -= len;
+	      if (u->len == 0)
+		undoing->prev = u->prev;
+	      else
+		u->pos += len;
+	      return;
+	    }
+	    // Overwrite is insert+delete, so go back an extra one to increase
+	    // the insert.  E.g.: overwrite "ab" with "12" - insert "a", delete
+	    // "1", insert "b", delete "2".  Insert "a" becomes insert "ab" and
+	    // then the two deletes combine as above to delete "12".
+	    if (u->pos + u->len == pos && u->prev->type == UNDOINSERT &&
+		u->prev->pos + u->prev->len == pos)
+	    {
+	      u = u->prev;
+	      if (!make_length( &u->txt, &u->max, u->len + len ))
+		return;
+	      memcpy( u->txt + u->len, line.txt + pos, WSZ(len) );
+	      u->len += len;
+	      return;
+	    }
+	  break;
+	}
+      break;
+
+      case UNDOINSERT:
+	switch (type)
+	{
+	  case UNDOINSERT:
+	    // Inserting at the same position (deleting "abc" from the front)
+	    // or inserting directly after an insert (replacing a long file name
+	    // with a shorter one) combines into a single insert.
+	    if (u->pos == pos || u->pos + u->len == pos)
+	    {
+	      if (!make_length( &u->txt, &u->max, u->len + len ))
+		return;
+	      memcpy( u->txt + u->len, line.txt + pos, WSZ(len) );
+	      u->len += len;
+	      return;
+	    }
+	    // Inserting before an insert (deleting "abc" from the end) shifts
+	    // the insert to the new position and extends it.
+	    if (pos + len == u->pos)
+	    {
+	      if (!make_length( &u->txt, &u->max, u->len + len ))
+		return;
+	      memmove( u->txt + len, u->txt, WSZ(u->len) );
+	      memcpy( u->txt, line.txt + pos, WSZ(len) );
+	      u->pos = pos;
+	      u->len += len;
+	      return;
+	    }
+	  break;
+	}
+      break;
+    }
+  }
+
+  if (u->next == NULL)
+  {
+    PUndoInfo t = malloc( sizeof(UndoInfo) );
+    if (t == NULL)
+      return;
+    t->txt = NULL;
+    t->max = 0;
+    t->prev = u;
+    t->next = NULL;
+    u->next = t;
+  }
+  undoing->prev = u = u->next;
+
+  u->type = type;
+  u->pos  = pos;
+  u->len  = len;
+
+  if (type == UNDOINSERT)
+  {
+    if (!make_length( &u->txt, &u->max, len ))
+    {
+      undoing->prev = u->prev;
+      return;
+    }
+    memcpy( u->txt, line.txt + pos, WSZ(len) );
+  }
+}
+
+
+// Perform a group of undo/redo operations, remembering the current position in
+// pos and updating it.
+BOOL undo_redo( PUndoInfo list, int* pos )
+{
+  PUndoInfo u = list->prev;
+
+  if (u->prev == u)
+    return FALSE;
+
+  // If undoing, use the redo list to store the new undo operations.
+  if (list == &undo)
+    undoing = &redo;
+
+  add_to_undo( UNDOGROUP, *pos, 0 );
+
+  while (u->type != UNDOGROUP)
+  {
+    switch (u->type)
+    {
+      case UNDOINSERT:
+	insert_chars( u->pos, u->txt, u->len );
+      break;
+
+      case UNDODELETE:
+	if (u->prev->type == UNDOINSERT && u->prev->pos == u->pos)
+	{
+	  u = u->prev;
+	  replace_chars( u->pos, u->next->len, u->txt, u->len );
+	}
+	else
+	  remove_chars( u->pos, u->len );
+      break;
+    }
+    u = u->prev;
+  }
+  *pos = u->pos;
+
+  if (list == &undo)
+    undoing = &undo;
+
+  list->prev = u->prev;
+  return TRUE;
 }
 
 
@@ -1001,7 +1224,8 @@ void edit_line( void )
 {
   DWORD  imode, omode;			// original input & output modes
   CONSOLE_CURSOR_INFO cci, org_cci;	// current and original cursor size
-  Key	 chfn;				// character and function read
+  Key	 chfn, prev;			// character and function read
+  PUndoInfo undo_here;			// to test if the line was modified
   char*  key;				// key read
   BOOL	 recording = FALSE;		// recording a keyboard macro?
   PMacro mac = NULL,  rec_mac = NULL;	// macro playing and recording
@@ -1045,6 +1269,8 @@ void edit_line( void )
 
   hist = &history;
   done = FALSE;
+  prev = (Key){ 0, Ignore };
+  reset_undo();
   while (!done)
   {
     if (mac)
@@ -1069,6 +1295,15 @@ void edit_line( void )
     recall &= cont_recall;		// update state of auto-recall
     cont_recall = 0;			//  and assume it shouldn't continue
     keep_mark = FALSE;			// remove the mark on non-movement
+
+    // Undo repeated functions as one, but separate words.
+    if (!(chfn.fn == prev.fn ||
+	  (prev.fn == Cycle &&
+	   (chfn.fn == CycleBack || chfn.fn == CycleDir ||
+	    chfn.fn == CycleDirBack))) ||
+	(chfn.fn == Default && isword( chfn.ch ) && !isword( prev.ch )))
+      add_to_undo( UNDOGROUP, pos, 0 );
+    undo_here = undo.prev;
 
     switch (chfn.fn)
     {
@@ -1277,8 +1512,7 @@ void edit_line( void )
       break;
 
       case DelEndLine:
-	set_display_marks( pos, line.len );
-	line.len = pos;
+	remove_chars( pos, line.len - pos );
       break;
 
       case StoreErase:
@@ -1291,11 +1525,11 @@ void edit_line( void )
 	cont_recall = 1;
 	find = slen = 0;
 	hist = &history;
+	reset_undo();
       break;
 
       case DelEndExec:
-	set_display_marks( pos, line.len );
-	line.len = pos;
+	remove_chars( pos, line.len - pos );
 
       case Enter:
 	add_to_history( TRUE );
@@ -1325,11 +1559,11 @@ void edit_line( void )
       case Transpose:
 	if (line.len >= 2)
 	{
+	  WCHAR tmp[2];
 	  start = (pos == 0) ? 0 : (pos == line.len) ? pos - 2 : pos - 1;
-	  chfn.ch = line.txt[start];
-	  line.txt[start]   = line.txt[start+1];
-	  line.txt[start+1] = chfn.ch;
-	  set_display_marks( start, start + 2 );
+	  tmp[0] = line.txt[start+1];
+	  tmp[1] = line.txt[start];
+	  replace_chars( start, 2, tmp, 2 );
 	}
       break;
 
@@ -1413,6 +1647,26 @@ void edit_line( void )
 	}
       break;
 
+      case Undo:
+	// If we haven't done anything yet, ignore the group.
+	if (undo.prev->type == UNDOGROUP)
+	  undo.prev = undo.prev->prev;
+	if (!undo_redo( &undo, &pos ))
+	  bell();
+      break;
+
+      case Redo:
+	if (!undo_redo( &redo, &pos ))
+	  bell();
+      break;
+
+      case Revert:
+	if ((prev.fn == Revert && undo.prev == &undo) || prev.fn == Undo)
+	  while (undo_redo( &redo, &pos )) ;
+	else
+	  while (undo_redo( &undo, &pos )) ;
+      break;
+
       case FirstLine:
 	hist = history.next;
 	goto hist_line;
@@ -1492,8 +1746,10 @@ void edit_line( void )
       case CycleDir:		// compl is 2 for for new completion
       case CycleDirBack:	//	    3 for continuing it
 	compl |= 2;
+	start = -1;		// assume no prefix
 	if (compl == 2 || name == 1 || name == 2)
 	{
+	  start = pos;		// prefix was added if pos moves
 	  if ((end = find_files( &pos, !(name & 2) )) == -1)
 	  {
 	    compl = 0;
@@ -1535,6 +1791,7 @@ void edit_line( void )
 	    else
 	      fnp = fname->next;
 	    end = fnp->len;
+	    start = -1; 		// no prefix when immediately completed
 	  }
 	}
 	else if (chfn.fn == List || chfn.fn == ListDir)
@@ -1573,6 +1830,9 @@ void edit_line( void )
 	pos = fname_pos + replace_chars( fname_pos, pos - fname_pos, fnm, end );
 	if (!dir && fnp != fname)
 	  pos += insert_chars( pos, L"\" " + 1 - quote, quote + 1 );
+	// Create a separate group for the prefix.
+	if (compl == 2 && start != -1 && start != pos)
+	  add_to_undo( UNDOGROUP, pos, 0 );
       break;
 
       case SelectFiles:
@@ -1692,6 +1952,10 @@ void edit_line( void )
 	pos = line.len;
       break;
     }
+    prev = chfn;
+    // These are the same as far as undo is concerned.
+    if (chfn.fn == CycleBack || chfn.fn == CycleDir || chfn.fn == CycleDirBack)
+      prev.fn = Cycle;
 
     if (recording)
     {
@@ -1739,13 +2003,22 @@ void edit_line( void )
 	{
 	  set_display_marks( pos, pos + 1 );
 	  if (pos == line.len)
+	  {
 	    ++line.len;
+	    add_to_undo( UNDODELETE, pos, 1 );
+	  }
+	  else
+	  {
+	    add_to_undo( UNDOINSERT, pos, 1 );
+	    add_to_undo( UNDODELETE, pos, 1 );
+	  }
 	}
       }
       else if (line.len < max)
       {
 	memmove( line.txt + pos + 1, line.txt + pos, WSZ(line.len - pos) );
 	set_display_marks( pos, ++line.len );
+	add_to_undo( UNDODELETE, pos, 1 );
       }
       if (dispend)
       {
@@ -1796,6 +2069,10 @@ void edit_line( void )
       else
 	bell();
     }
+    // Reset the redo if the line was modified normally.
+    if (undo.prev != undo_here &&
+	chfn.fn != Undo && chfn.fn != Redo && chfn.fn != Revert)
+      redo.prev = &redo;
 
     if (!keep_mark)
       markpos = ~0;
@@ -4560,6 +4837,24 @@ BOOL make_line( DWORD len )
     max = len;
   }
   line.len = len;
+  return TRUE;
+}
+
+
+// Ensure txt of len is long enough for new_len.
+BOOL make_length( PWSTR* txt, DWORD* len, DWORD new_len )
+{
+  PWSTR tmp;
+
+  if (*len < new_len)
+  {
+    new_len += *len;
+    tmp = realloc( *txt, WSZ(new_len) );
+    if (tmp == NULL)
+	return FALSE;
+    *txt = tmp;
+    *len = new_len;
+  }
   return TRUE;
 }
 
