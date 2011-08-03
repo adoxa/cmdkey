@@ -42,7 +42,8 @@
   + new functions Undo, Redo & Revert;
   - read the options even if not installed (to preserve for the install);
   * treat a hex keypad number < 256 as Unicode;
-  - fixed substituting empty macro argument.
+  - fixed substituting empty macro argument;
+  * expand multiline macros using the command separator.
 */
 
 #include <stdio.h>
@@ -679,7 +680,7 @@ void	free_linelist( PLineList );		// free memory used by line list
 BOOL read_cmdfile( PCSTR );		// read the file
 BOOL get_file_line( BOOL );		// read the line from file
 void get_next_line( void );		// get next line of input
-void get_macro_line( void );		// input coming from a macro
+void get_macro_line( BOOL );		// input coming from a macro
 void pop_macro( void ); 		// macro finished, remove it from stack
 
 
@@ -1976,7 +1977,9 @@ void edit_line( void )
 	expand_braces();
 	expand_vars( TRUE );
 	associate();
-	expand_macro();
+	if (expand_macro())
+	  while (macro_stk)
+	    get_macro_line( FALSE );
 	expand_symbol();
 	pop_macro();
 	pos = line.len;
@@ -3150,7 +3153,7 @@ void get_next_line( void )
   if (file)
     get_file_line( FALSE );
   else if (macro_stk)
-    get_macro_line();
+    get_macro_line( TRUE );
   else if (mcmd.txt)
   {
     if (mcmd.len)
@@ -3171,13 +3174,23 @@ void get_next_line( void )
 // Retrieve a line from a macro, replacing "%n" with the nth argument (0 to 9),
 // "%*" with all arguments, or "%n*" with all arguments from the nth.  Use the
 // escape character to treat the '%' or '*' literally.
-void get_macro_line( void )
+void get_macro_line( BOOL first )
 {
   DWORD pos, arg, cnt;
   int	argnum, var;
   Line	temp;
 
-  replace_chars( 0, line.len, macro_stk->line->line, macro_stk->line->len );
+  if (first)
+  {
+    // Use this rather than copy_chars so undoing the expansion will work.
+    replace_chars( 0, line.len, macro_stk->line->line, macro_stk->line->len );
+  }
+  else
+  {
+    WCHAR sep = CMDSEP;
+    insert_chars( line.len, &sep, 1 );
+    insert_chars( line.len, macro_stk->line->line, macro_stk->line->len );
+  }
   for (pos = 0; pos < line.len; ++pos)
   {
     if (line.txt[pos] == ESCAPE)
@@ -3587,7 +3600,7 @@ BOOL expand_macro( void )
     return FALSE;
 
   macro_stk->line = m->line;
-  get_macro_line();
+  get_macro_line( TRUE );
 
   return TRUE;
 }
