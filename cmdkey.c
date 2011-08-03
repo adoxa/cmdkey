@@ -9,9 +9,25 @@
 
   v1.02, 23 July, 2010:
   + add -I/-U to use HKLM.
+
+  v2.00, 22 July to 3 August, 2011:
+  * compile cleanly with GCC 4;
+  * slight improvements in finding parent process;
+  * install as a batch file (cmdkey.cmd) to improve load time for "cmd /c";
+  * -e applies to any search, not just blank;
+  - fixed updating the config file;
+  + option to specify file for a persistent history;
+  * use specific options for each prompt colour;
+  + added colour for the prompt's base directory;
+  + added -_ to control whether underscore is part of a word;
+  + added -km to choose the selection colour;
+  * test the config file is readable here, not in edit;
+  + added --version;
+  - fixed the status (using wrong value of enabled; future-proof);
+  * removed NT version.
 */
 
-#define PDATE "2 August, 2011"
+#define PDATE "3 August, 2011"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -43,7 +59,7 @@ void help( void );
 BOOL  find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32, LPPROCESSENTRY32 );
 DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo );
 BOOL  IsInstalled( DWORD id );
-void  GetStatus( DWORD );
+void  GetStatus( DWORD id );
 void  Inject( LPPROCESS_INFORMATION pinfo );
 
 
@@ -537,7 +553,7 @@ BOOL IsInstalled( DWORD id )
   // Take a snapshot of all modules in the current process.
   hModuleSnap = CreateToolhelp32Snapshot( TH32CS_SNAPMODULE, id );
 
-  if (hModuleSnap == (HANDLE)-1)
+  if (hModuleSnap == INVALID_HANDLE_VALUE)
   {
     puts( "CMDkey: unable to obtain module snapshot." );
     return FALSE;
@@ -567,7 +583,7 @@ void GetStatus( DWORD id )
   {
     if (!ReadProcessMemory( parent, &local, &local, sizeof(local), NULL ))
       local.version = 0x101;
-    else if (local.version == 0x64616552)
+    else if (local.version == 0x00035028)
       local.version = 0x102;
     CloseHandle( parent );
   }
