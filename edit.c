@@ -858,7 +858,12 @@ void reset_undo()
 // Add an operation to the current list, consolidating where possible.
 void add_to_undo( int type, DWORD pos, DWORD len )
 {
-  PUndoInfo u = undoing->prev;
+  PUndoInfo u;
+
+  if (!undoing)
+    return;
+
+  u = undoing->prev;
 
   if (type == UNDOGROUP)
   {
@@ -2216,6 +2221,7 @@ void edit_line( void )
 
     SetConsoleCursorPosition( hConOut, line_to_scr( (done) ? line.len : pos ) );
   }
+  undoing = NULL;
 
   SetConsoleCursorInfo( hConOut, &org_cci );
   SetConsoleMode( hConOut, omode );
