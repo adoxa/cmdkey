@@ -14,7 +14,7 @@
   - tweaks to completion;
   + read options from HKLM if they don't exist in HKCU.
 
-  v2.00, 22 July to 3 August, 2011:
+  v2.00, 22 July to 5 August, 2011:
   * compile cleanly with GCC 4;
   - fixed file name completion with leading/trailing dot;
   + new function Execute to prevent adding the line to history;
@@ -43,7 +43,8 @@
   - read the options even if not installed (to preserve for the install);
   * treat a hex keypad number < 256 as Unicode;
   - fixed substituting empty macro argument;
-  * expand multiline macros using the command separator.
+  * expand multiline macros using the command separator;
+  * LSTH uses ESCAPE to find numbers and search for the redirection symbols.
 */
 
 #include <stdio.h>
@@ -701,6 +702,7 @@ void expand_vars( BOOL );		// expand environment vars and symbols
 
 History  history = { &history, &history, 0 };	// constant empty line
 int	 histsize;				// number of lines in history
+#define  HISTSIZE 1000				// restrict the file to this
 
 PHistory new_history( PCWSTR, DWORD );		// allocate new history item
 void	 remove_from_history( PHistory );	// remove item from history
@@ -2442,8 +2444,11 @@ void write_history( void )
 
   for (h = history.next; h != &history; h = h->next)
   {
-    fwrite( &h->len, 2, 1, file );
-    fwrite( h->line, WSZ(h->len), 1, file );
+    if (--histsize < HISTSIZE)
+    {
+      fwrite( &h->len, 2, 1, file );
+      fwrite( h->line, WSZ(h->len), 1, file );
+    }
   }
   fclose( file );
 }
@@ -3637,7 +3642,7 @@ BOOL internal_cmd( void )
   if (func == -1)
     return FALSE;
 
-  if (kbd)
+  if (kbd && func != (int)execute_lsth)
     un_escape( NULL );
 
   pos = skip_blank( pos + cnt );
@@ -4108,19 +4113,37 @@ void execute_lsta( DWORD pos )
 
 // List all the lines in the history, or the last N lines, or the first N lines
 // if N is negative, or the lines containing the text.	The most recent line is
-// always displayed last.  If the text starts with '"', skip over it - this
-// allows numbers to be matched.
+// always displayed last.
 // Eg: lsth 5	- show the last five commands;
-//     lsth "5  - show the commands containing 5;
-//     lsth "5" - show the commands containing "5".
+//     lsth ^5	- show the commands containing 5;
+//     lsth "5" - show the commands containing "5";
+//     lsth "  >quote - write commands containing a quote followed by a space to
+//			the file called quote
 void execute_lsth( DWORD pos )
 {
   PHistory h;
   DWORD    cnt;
-  BOOL	   back, q;
+  BOOL	   back, find;
   int	   end;
 
-  if (!redirect( pos ))
+  // Unescape manually, to allow for escaped redirection characters.
+  find = FALSE;
+  for (end = pos; end < line.len; ++end)
+  {
+    if (line.txt[end] == ESCAPE && end+1 < line.len)
+    {
+      if (end == pos)
+	find = TRUE;
+      remove_chars( end, 1 );
+    }
+    else if (line.txt[end] == '>' || line.txt[end] == '|')
+    {
+      if (line.txt[end-1] == ' ')
+	remove_chars( --end, 1 );
+      break;
+    }
+  }
+  if (!redirect( end ))
     return;
 
   if (pos == line.len)
@@ -4130,35 +4153,48 @@ void execute_lsth( DWORD pos )
   }
   else
   {
-    cnt  = 0;
-    q	 = (line.txt[pos] == '"' && pos+1 < line.len);
-    end  = pos + q;
-    back = (line.txt[end] == '-') ? ++end, FALSE : TRUE;
-    while (end < line.len && '0' <= line.txt[end] && line.txt[end] <= '9')
+    cnt = 0;
+    back = TRUE;
+    if (!find)
     {
-      cnt = cnt * 10 + line.txt[end] - '0';
-      ++end;
-    }
-    if (end != line.len)		// there's more after the number
-      cnt = 0;				//  so treat it as text
-    else if (q) 			// if it started with a quote
-      cnt = 0, ++pos;			//  treat the number as text
-
-    if (cnt)
-    {
-      if (back)
+      end = pos;
+      if (line.txt[end] == '-')
       {
-	// List the last cnt commands, excluding this one (assuming it's
-	// not a keyboard macro).
-	for (end = cnt, h = history.prev; end > 0 && h != &history;)
-	  --end, h = h->prev;
-	if (h == &history)
-	  h = history.next;
+	back = FALSE;
+	++end;
       }
-      else
-	h = history.next;
-      for (; h != &history && cnt; --cnt, h = h->next)
-	fprintf( lstout, "%.*S\n", (int)h->len, h->line );
+      while (end < line.len && '0' <= line.txt[end] && line.txt[end] <= '9')
+      {
+	cnt = cnt * 10 + line.txt[end] - '0';
+	++end;
+      }
+      if (end != line.len)		// there's more after the number
+	find = TRUE;			//  so treat it as text
+      else if (cnt > histsize - 1)
+	cnt = histsize - 1;
+    }
+    if (!find)
+    {
+      if (cnt)
+      {
+	if (back)
+	{
+	  // List the last cnt commands, excluding this one (assuming it's
+	  // not a keyboard macro).
+	  h = history.prev;
+	  end = cnt;
+	  do
+	    h = h->prev;
+	  while (--end);
+	}
+	else
+	  h = history.next;
+	do
+	{
+	  fprintf( lstout, "%.*S\n", (int)h->len, h->line );
+	  h = h->next;
+	} while (--cnt);
+      }
     }
     else				// list commands containing text,
     {					//  excluding this command
@@ -4314,8 +4350,9 @@ BOOL redirect( DWORD pos )
   PCSTR  err = NULL;
   DWORD  append;
 
-  lstout = stdout;
-  append = 0;
+  lstpipe = FALSE;
+  lstout  = stdout;
+  append  = 0;
   for (; pos < line.len; ++pos)
   {
     // No real need to test the quoting of these.
@@ -4347,7 +4384,6 @@ BOOL redirect( DWORD pos )
       }
       else
       {
-	lstpipe = FALSE;
 	lstout	= _wfopen( line.txt + beg, mode );
 	err	= (append) ? "open" : "create";
       }
