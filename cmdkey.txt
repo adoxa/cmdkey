@@ -1,9 +1,9 @@
 
 				     CMDkey
 
-			  Copyright 2006-10 Jason Hood
+			  Copyright 2006-11 Jason Hood
 
-			    Freeware.  Version 1.02
+			    Freeware.  Version 2.00
 
 
     ===========
@@ -18,13 +18,31 @@
     back a sequence of keystrokes.
 
 
+    ============
+    Requirements
+    ============
+
+    Windows 2000 or later.
+    32-bit CMD.EXE.
+
+
     =====
     Usage
     =====
 
-    Running `cmdkey' will install CMDkey into its parent process (typically
+    Running "cmdkey" will install CMDkey into its parent process (typically
     CMD.EXE, but it may also work with other command processors).  Usually,
-    though, you will use `-i' to start it with every instance of CMD.EXE.
+    though, you will use "-i" to start it with every instance of CMD.EXE.
+
+    ---------
+    Upgrading
+    ---------
+
+    Version 2 uses an improved method of installing (via a batch file in-
+    stead of directly), but I did not automate the upgrade, so run "cmdkey
+    -u" with your current version before running "cmdkey -i" with this
+    version.  Using a batch file allows CMD.EXE to load quicker when CMDkey
+    will not be needed (using "/c" to run a command and exit).
 
     -------
     Options
@@ -34,7 +52,8 @@
 
 	-b	disable backslash appending for completed directories
 	-c	swap insert and overwrite cursors, or set their size
-	-e	searching history with an empty line will move cursor to end
+	-e	searching history will move the cursor to the end
+	-f	specify/disallow history file
 	-g	silent mode
 	-h	number of commands to remember
 	-i	install
@@ -46,19 +65,20 @@
 	-t	disable translation
 	-u	uninstall
 	-z	disable CMDkey
+	-_	treat underscore as punctuation, not part of a word
 
-    Options can also start with '/' and may be combined (eg: "-c -o", "/c/o"
-    and "-co" are all equivalent).  An option may be prefixed with '-' or
-    '+' to explicitly set its behaviour, otherwise it toggles (eg: "-o" will
-    toggle between insert and overwrite modes, "--o" will set insert mode
-    and "-+o" will set overwrite mode).  Except for `-z' all these options
-    apply to every instance of CMDkey.
+    Options can also start with "/" and may be combined (e.g.: "-c /o",
+    "/c/o" and "-co" are all equivalent).  An option may be prefixed with
+    "-" or "+" to explicitly set its behaviour, otherwise it toggles (e.g.:
+    "-o" will toggle between insert and overwrite modes, "--o" will set
+    insert mode and "-+o" will set overwrite mode).  Except for "-z" all
+    these options apply to every instance of CMDkey.
 
     -b - Backslash appending
 
     When completing a directory CMDkey will normally add a backslash after
-    it (eg. "dir" --> "directory\").  Use this option to prevent anything
-    being added (like CMD.EXE, eg. "dir" --> "directory").
+    it (e.g. "dir" --> "directory\").  Use this option to prevent anything
+    being added (like CMD.EXE, e.g. "dir" --> "directory").
 
     -c - Cursor
 
@@ -72,15 +92,24 @@
 
     -e - Move to end
 
-    Searching through the history will leave the cursor where it is, but
-    this may not be desired when searching a blank line.  Using this option
-    will move the cursor to the end, like the history movement commands.
+    Searching the history for a matching command will normally leave the
+    cursor where it is (i.e. at the common prefix); this option will move it
+    to the end, like the history movement commands.
+
+    -f - History file
+
+    The "primary" instance of CMDkey will save its history to this file when
+    CMD.EXE exits and restore it when next run.  The default is "cmdkey.hst"
+    in the same directory as "cmdkey.exe"; if no file is specified, the his-
+    tory will not be saved.  The primary instance is the first one to load,
+    or the next one loaded after the first one exits.  If you've chosen to
+    remember every line, "only" the last 1000 will be saved.
 
     -g - Silent
 
-    Certain operations will beep to let you know something has happened (eg.
-    going through all the completed file names).  Use this option to sup-
-    press the beep and make CMDkey quiet.
+    Certain operations will beep to let you know something has happened
+    (e.g. going through all the completed file names).	Use this option to
+    suppress the beep and make CMDkey quiet.
 
     -h - History size
 
@@ -102,17 +131,24 @@
     of colour.	This option can turn off the colours, or set the colours you
     would like to use:
 
-	-kcCMD - the command line itself
-	-krREC - recording a macro
-	-kpDRV,SEP,DIR,GT - the drive letter and colon, path separator, dir-
-			    ectory components and greater-than sign of the
-			    usual $P$G prompt
+	-kcCMD	- the command line itself
+	-kmSEL	- selected text
+	-krREC	- recording a macro
+	-kdDRV	- prompt's drive letter and colon
+	-ksSEP	- prompt's path separators
+	-kpDIR	- prompt's directories
+	-kbBASE - prompt's base directory
+	-kgGT	- prompt's greater-than sign
 
     Each uppercase sequence above is a one- or two-digit hexadecimal number
-    (see CMD.EXE's own COLOR help).  The default colours are "-kc1f -kr1b
-    -kp1b,1e,1a,1e" which is blue background, bright white command line,
+    (see CMD.EXE's own COLOR help).  The prompt colours are only for the
+    usual $P$G prompt (any other prompt will remain uncoloured); the base
+    directory is the final directory component.  The default colours are
+    "-kc1f -km79 -kr1b -kd1b -ks1e -kp1a -kb1a -kg1e" which is blue
+    background, bright white command line, bright blue on grey selection,
     bright cyan recording and drive letter/colon, bright yellow separator
-    and greater-than sign and bright green directory components.
+    and greater-than sign and bright green directory components.  Try using
+    "-kp12" to see the effect of the base directory.
 
     -l - Length
 
@@ -143,21 +179,34 @@
 
     -u - Uninstall
 
-    Remove the AutoRun entry added by `-i' (`-U' will remove `-I').  CMDkey
+    Remove the AutoRun entry added by "-i" ("-U" will remove "-I").  CMDkey
     will still remain active until CMD.EXE itself exits.
 
     -z - Disable
 
     Disable CMDkey, restoring the original input behaviour.
 
+    -_ - Underscore
+
+    Underscore is usually treated as part of a word (e.g. "abc_123" forms a
+    single word).  This option treats underscore as punctuation (the prior
+    example becomes two words).
+
     Finally, a file name can be given to configure CMDkey.  The default name
-    is `cmdkey.cfg' in the same directory as `cmdkey.exe'.  The file can
-    contain anything: lines beginning with a minus ('-') and blank lines are
+    is "cmdkey.cfg" in the same directory as "cmdkey.exe".  The file can
+    contain anything: lines beginning with a minus ("-") and blank lines are
     ignored (unless they are part of a macro definition); a CMDkey internal
     command will be executed; anything else will be stored in the history.
     The format of the commands in the file is the same as if you typed them
-    from the command prompt, except there is no need to escape '^'.  Lines
-    may be up to 1024 characters long.
+    from the command prompt, except there is no need to escape "^".  Lines
+    may be up to 1024 characters long.	The file is interpreted using the
+    system OEM code page, unless it starts with the UTF-8 byte-order mark.
+
+    Configuration can be customised according to the initial directory by
+    starting a line with "#" followed by the directory (using the full path,
+    without any quotes).  If the immediate next line starts with "=", what
+    follows is the history file; otherwise the normal primary rule applies.
+    The history file's path will be taken relative to the config file.
 
     ----
     Keys
@@ -166,9 +215,9 @@
     CMDkey recognises all the normal control keys, shift and control keys,
     normal, shift, control, and alt editing and function keys, and normal,
     shift, control, and shift and control backspace, tab, enter and escape.
-    Control is represented by '^', shift by '#', shift and control by `#^'
-    (but not `^#') and alt by '@'.  The normal control keys are `^A' to
-    `^Z', plus:
+    Control is represented by "^", shift by "#", shift and control by "#^"
+    (but not "^#") and alt by "@".  The normal control keys are "^A" to
+    "^Z", plus:
 
 	^@ - Ctrl+2	^[
 	^^ - Ctrl+6	^]
@@ -184,7 +233,7 @@
 	Esc	Escape		Tab	Tab
 	Home	Home		Up	Arrow up
 
-    Function keys are simply `F1' to `F12'.
+    Function keys are simply "F1" to "F12".
 
     There are also shortcut keys to the Edit menu:
 
@@ -193,10 +242,10 @@
 	Alt+S	Scroll
 	Alt+V	Paste
 
-    Alt+keypad entry has been improved, too.  A number between 1 and 255
-    will be taken as an OEM (code page) character, and higher numbers will
-    be treated as Unicode.  A leading zero will make the number hexadecimal,
-    using `/*-+Enter.' as hex digits A to F.
+    Alt+keypad entry has been improved, too.  A leading zero will make the
+    number hexadecimal, using "/*-+Enter." as hex digits A to F.  A decimal
+    number between 1 and 255 will be taken as an OEM (code page) character,
+    otherwise it will be treated as Unicode (up to U+FFFF).
 
     DEFK - Define key
 
@@ -227,67 +276,99 @@
     Functions
     ---------
 
-    The editing functions that can be assigned to a key are:
+    The editing functions (in alphabetical order) with their default keys
+    and a brief description:
 
-	AutoRecall	 toggle auto-recall
-	BegLine 	 move cursor to the beginning of the line
-	CharLeft	 move cursor one character to the left
-	CharRight	 move cursor one character to the right
-	CmdSep		 command separator
-	Cycle		 filename completion cycle
-	CycleBack	 filename completion cycle backwards
-	CycleDir	 directory completion cycle
-	CycleDirBack	 directory completion cycle backwards
-	Default 	 just add the character to the line
-	DelArg		 delete argument at or left of cursor
-	DelBegLine	 delete to the beginning of the line
-	DelEndExec	 delete to the end of the line and execute the line
-	DelEndLine	 delete to the end of the line
-	DelLeft 	 delete character to the left of the cursor
-	DelRight	 delete character under the cursor
-	DelWordLeft	 delete word at left of cursor
-	DelWordRight	 delete word at right of cursor
-	EndLine 	 move cursor to the end of the line
-	Enter		 accept line
-	Erase		 erase line (and reset history pointer)
-	FirstLine	 recall first command in history
-	Ignore		 totally ignore the key
-	InsOvr		 insert/overwrite toggle
-	LastLine	 recall last command in history
-	List		 filename completion list
-	ListDir 	 directory completion list
-	MacroToggle	 macro/symbol/brace toggling
-	NextLine	 recall next command in history buffer
-	PrevLine	 recall previous command in history buffer
-	Quote		 the next key will not be interpreted as a command
-	Record		 record a series of keys
-	SearchBack	 search the history backwards
-	SearchForw	 search the history forwards
-	SelectFiles	 select files from the Open dialog
-	StoreErase	 erase the line but put it in the history
-	StringLeft	 move cursor to start of the current/previous string
-	StringRight	 move cursor to start of the next string
-	Transpose	 swap the character at the cursor with that before
-	VarSubst	 inline var. substitution/brace expansion/association
-	Wipe		 execute the line but don't put it in the history
-	WordLeft	 move cursor to start of the current/previous word
-	WordRight	 move cursor to start of the next word
+    Function	   Key(s)      Description
+    --------------------------------------------------------------------------
+    AutoRecall	   ^Y	       toggle auto-recall
+    BegLine	   ^A Home     move cursor to the beginning of the line
+    CharLeft	   ^B Left     move cursor one character to the left
+    CharRight	   ^F Right    move cursor one character to the right
+    CmdSep	   ^S ^]       command separator
+    CopyFromPrev   F3	       copy remainder of line from previous command
+    Cut 	   ^C #Del     cut selected text or current/previous argument
+    Cycle	   ^I Tab      file name completion cycle
+    CycleBack	   #^I #Tab    file name completion cycle backwards
+    CycleDir	   ^\	       directory completion cycle
+    CycleDirBack   #^\	       directory completion cycle backwards
+    Default		       just add the character to the line
+    DelArg	   #^Bksp      delete argument at or left of cursor
+    DelBegLine	   ^X ^Home    delete to the beginning of the line
+    DelEndExec	   ^O	       delete to the end of the line and execute
+    DelEndLine	   ^K ^End     delete to the end of the line
+    DelLeft	   ^H Bksp     delete character to the left of the cursor
+    DelRight	   ^D Del      delete character under the cursor
+    DelWordLeft    ^L ^Bksp    delete word at left of cursor
+    DelWordRight   ^W ^Del     delete word at right of cursor
+    EndLine	   ^E End      move cursor to the end of the line
+    EndWordLeft    #Left       move cursor to the end of the previous word
+    EndWordRight   #Right      move cursor to the end of the current/next word
+    Enter	   Enter       accept line
+    Erase	   ^[ Esc      erase line (and reset history pointer)
+    Execute	   ^Enter      accept line without adding it to the history
+    FindBack	   #^R ^Up     incrementally search the history backwards
+    FindForw	   #^V ^Down   incrementally search the history forwards
+    FirstLine	   PgUp        recall first command in history
+    Ignore		       totally ignore the key
+    InsOvr	   Ins	       insert/overwrite toggle
+    LastLine	   PgDn        recall last command in history
+    List	   #^F ^Tab    file name completion list
+    ListDir	   #^D #^Tab   directory completion list
+    MacroToggle    ^_	       macro/symbol/brace toggling
+    NextLine	   ^N Down     recall next command in history buffer
+    Paste	   #^P #Ins    paste cut text
+    PrevLine	   ^P ^U Up    recall previous command in history buffer
+    Quote	   ^Q	       next key will not be interpreted as a function
+    Record	   F12	       record a series of keys
+    Redo	   #^Z	       undo the undo
+    Revert	   #^U	       undo/redo everything
+    SearchBack	   ^R F8       search the history backwards
+    SearchForw	   ^V #F8      search the history forwards
+    Select	   ^M	       select text
+    SelectFiles    #^S	       select files from the standard Open dialog
+    StoreErase	   ^G	       erase the line but put it in the history
+    StringLeft	   @Left       move cursor to start of current/previous string
+    StringRight    @Right      move cursor to start of next string
+    SwapArgs	   #^A	       swap current/previous argument with that before
+    SwapWords	   #^T	       swap current/previous word with that before
+    Transpose	   ^T	       swap character at the cursor with that before
+    UnderToggle    #^_	       change behaviour of underscore
+    Undo	   ^Z	       undo changes to the line
+    VarSubst	   ^J	       inline substitution/brace expansion/association
+    Wipe	   ^^	       accept line but remove it from the screen
+    WordLeft	   ^Left       move cursor to start of current/previous word
+    WordRight	   ^Right      move cursor to start of next word
 
-    A word is a sequence of alphanumeric characters, plus the underscore.  A
-    string is a sequence of characters between spaces or tabs.	An argument
-    is a string which may also contain characters between double quotes.
-    The brief descriptions above should be adequate for most functions, so I
-    will only detail a select few.
+    A word is a sequence of alphanumeric characters, optionally including
+    the underscore.  A string is a sequence of characters between spaces or
+    tabs.  An argument is a string which may also contain characters between
+    double quotes.  The brief descriptions above should be adequate for most
+    functions, so I will only detail a select few.
 
     CmdSep - command separator
 
     CMDkey is capable of specifying several commands on the one line.  This
     key will add the character to separate those commands.  Note that this
     character is a literal character 19, so commands can also be separated
-    by quoting `^S' or using the keypad.  Note that spaces are significant
-    between the separator: `a  b' is the two commands `a ' and ` b'.  This
+    by quoting ^S or using the keypad.	Note that spaces are significant
+    between the separator: "a  b" is the two commands "a " and " b".  This
     is particularly important when the ignore character is a space.  The
     command separator cannot be used with symbol or macro definitions.
+
+    CopyFromPrev - copy from previous command
+
+    Replace the line from the cursor with the previous command (that was
+    entered, not from the history), also from the cursor.
+
+    FindBack, FindForw - incremental search
+
+    Searches the history for any line that contains the text you type in (or
+    have already entered).  Repeating the search will look for another line,
+    not for another instance of the text on the same line.  For example, if
+    you have a line "cmdkey.cmd" and search backwards for "cmd", it will
+    place you at the "k" after the first "cmd"; searching again will not
+    place you at the end after the second "cmd", but look for another line.
 
     InsOvr - insert/overwrite toggle
 
@@ -296,10 +377,10 @@
 
     MacroToggle - macro/symbol/brace toggling
 
-    Equivalent to the `-t' command line option and will disable the usual
+    Equivalent to the "-t" command line option and will disable the usual
     translations CMDkey makes to the line, explained below.
 
-    Quote - the next key will not be interpreted as a command
+    Quote - the next key will not be interpreted as a function
 
     Disable CMDkey's function interpretation of the key and treat it as a
     literal character.
@@ -311,12 +392,33 @@
     then play back all those keystrokes again.	The assigned key cannot be
     any key assigned to Enter, Erase or Record.
 
+    Revert - undo/redo everything
+
+    If the previous function was Undo or Revert, Revert will Redo every-
+    thing, otherwise it will Undo everything.
+
+    Select - select text
+
+    Using this will mark the current (or last, if at the end) character; use
+    the normal movement functions to extend the selection.  Cut will make a
+    copy of the selection, then delete it; DelLeft & DelRight will just del-
+    ete it; Paste will replace it (provided something has been Cut); any-
+    thing else will just remove the selection.
+
+    Undo - undo changes to the line
+
+    Any function that modifies the line can be undone (and redone, if no
+    further changes are made).	Repeated uses of a function are all undone
+    at once, with two exceptions: characters will undo to the start of a
+    word and file name completion to the prefix.  Recalling a line from the
+    history will reset the undo.
+
     VarSubst - inline variable substitution/brace expansion/association
 
-    Expand braces, variables, perform association, expand the first line of
-    a macro and then expand symbols once, in that order.  Editing then cont-
-    inues on the expanded line.  Variables are either environment variables
-    or CMDkey symbols, enclosed within percent signs.
+    Expand braces and variables, perform association, expand a macro (using
+    the command separator to combine multiple lines) and expand a symbol, in
+    that order.  Editing then continues on the expanded line.  Variables are
+    either environment variables or symbols, enclosed within percent signs.
 
     --------------------
     File Name Completion
@@ -340,25 +442,25 @@
 
     If the name to be completed is the first argument on the line then only
     executables and directories will be selected.  Executables are defined
-    by CMDkey's and Window's associations and one of the `FEXEC' or
-    `PATHEXT' environment variables.  If neither of those variables is
+    by CMDkey's and Window's associations and one of the "FEXEC" or
+    "PATHEXT" environment variables.  If neither of those variables is
     defined the default list is
 
 	set FEXEC=.exe.com.bat.cmd
 
     If it's not the first argument then certain extensions will be ignored.
-    These can be selected with the `FIGNORE' environment variable.  The
+    These can be selected with the "FIGNORE" environment variable.  The
     default list is:
 
 	set FIGNORE=.exe.com.dll.obj.o.bak
 
     If a file with an ignored extension is the only such file then it will
     be selected.  Files with no extension can be selected by having a dot by
-    itself (eg: "set FIGNORE=.exe.com.dll.obj.o.bak.").
+    itself (e.g.: "set FIGNORE=.exe.com.dll.obj.o.bak.").
 
-    If the matching name is a directory a '\' or '/' is appended, making it
+    If the matching name is a directory a "\" or "/" is appended, making it
     easier to enter a complete path specification (unless this has been
-    disabled with the `-b' command line option, in which case nothing is
+    disabled with the "-b" command line option, in which case nothing is
     appended).	If the matching name is not a directory a space is placed
     after the name.
 
@@ -405,9 +507,9 @@
     @
     -
 
-    When used at the start of a line '@' is a special command line modifier
-    which asks CMDkey to "dosify" the line.  CMDkey will replace '/' with
-    '\', leading '-'s with '/' and remove trailing backslashes from the
+    When used at the start of a line "@" is a special command line modifier
+    which asks CMDkey to "dosify" the line.  CMDkey will replace "/" with
+    "\", leading "-"s with "/" and remove trailing backslashes from the
     line.  For example, if you type:
 
 	@rd -q /old/directory/
@@ -420,18 +522,18 @@
     ^
     -
 
-    As with CMD.EXE, CMDkey uses the '^' character as an escape character.
+    As with CMD.EXE, CMDkey uses the "^" character as an escape character.
     Any character following it will be treated as a literal character, los-
     ing any special significance CMDkey would give it.	Of particular note
-    is specifying control keys on the command line, which require two '^'
-    characters to be recognised (eg: "lstk ^^a").
+    is specifying control keys on the command line, which require two "^"
+    characters to be recognised (e.g.: "lstk ^^a").
 
     -------
     History
     -------
 
     The history stores each line that has been entered (provided it meets
-    the minimum length requirements of `-l').  Moving through the history is
+    the minimum length requirements of "-l").  Moving through the history is
     a cyclic operation, so if you come to the end it will continue from the
     start.  Erasing a line will move the history back to the start.  A line
     is only stored once, matching case.  Searching, however, is always done
@@ -451,13 +553,16 @@
 
     List every command in the history, the last N commands, the first N com-
     mands or every command containing text.  The LSTH command itself will
-    only be included when listing every command.
+    only be included when listing every command.  This command treats quotes
+    as literal characters (although a redirected file name must still be
+    quoted as usual) and trailing spaces are significant (but a space before
+    ">" or "|" is removed).
 
-	LSTH 5	   list the last five lines
-	LSTH -5    list the first five lines
-	LSTH text  list the lines containing `text'
-	LSTH "5    list the lines containing `5'
-	LSTH "5"   list the lines containing `"5"'
+	LSTH 5		  list the last five lines
+	LSTH -5 	  list the first five lines
+	LSTH text	  list the lines containing "text"
+	LSTH ^5 	  list the lines containing "5"
+	LSTH "  >quotes   "quotes" will contain lines having quote-space
 
     RSTH - Reset history
 
@@ -471,7 +576,7 @@
 
     Directories and certain extensions can be "directly" executed from the
     command line.  If the first argument on the line ends in either a slash
-    or backslash (ie. '/' or '\') it will be treated as a directory and have
+    or backslash (ie. "/" or "\") it will be treated as a directory and have
     the definition of the backslash association inserted and the trailing
     (back)slash removed:
 
@@ -500,7 +605,7 @@
     will associate C, assembly and extensionless files to tde.	However,
     remember to type the dot yourself, file name completion will not add it.
 
-    A secondary association can be made by appending '=' to the extension:
+    A secondary association can be made by appending "=" to the extension:
 
 	defa .txt=.doc= tde
 	cmdkey.txt=
@@ -599,6 +704,15 @@
 	md newdir
 	cd newdir
 
+    The name may be left out, in which case the macro will expand on an
+    empty line.
+
+	defm
+	time/t
+	endm
+
+    will show the time by just pressing Enter.
+
     Redefining a macro will replace the current definition; defining a macro
     with the same name as a symbol will delete the symbol.
 
@@ -619,18 +733,6 @@
     Known Problems
     ==============
 
-    The `cmdkey' program will not work with NT; `cmdkeynt' is provided for
-    that system.  In this case, use `-i' to start a new instance of the
-    command processor (the program defined by the `ComSpec' environment
-    variable) using CMDkey.  Without `-i' it will assume it is already
-    installed (and display its status or update its options).
-
-    The prompt may not be redisplayed after executing an internal command if
-    another program has hooked output (eg. my ANSICON program).
-
-    Macros and multiple commands will remove the prompt, but this relies on
-    ECHO being on and the processor adding a blank line.
-
     If you have scrolled the window to move the current line to the bottom,
     recalling a command that extends to the next line will not scroll the
     window to make the entire command visible.
@@ -641,7 +743,7 @@
 
 	path %CD%;%path%
 
-    but I also have ';' defined as a symbol, so it leaves "%CD", expands
+    but I also have ";" defined as a symbol, so it leaves "%CD", expands
     "%;%" and leaves "path%".  The solution is to escape the semicolon:
 
 	path %CD%^;%path%
@@ -652,6 +754,45 @@
     =======
 
     Legend: + added, - bug-fixed, * changed.
+
+    v2.00, 22 July to 5 August, 2011:
+    - fixed file name completion with leading/trailing dot;
+    - ensure input is from the console (prevents "set/p <nul" from crashing);
+    - ignore input from non-commands (at least "set/p");
+    - find imports by name (fixes ANSICON issue);
+    - macros will not take arguments after a pipe, ampersand or redirection;
+    - fixed substituting an empty macro argument;
+    - piping internal commands will also use the pipe options;
+    - fixed colouring a redisplayed multi-line prompt at the end of the buffer;
+    - ignore ^C generated by Ctrl+Break;
+    - read the options even if not installed (to preserve for the install);
+    - fixed updating the config file;
+    - fixed the enabled status;
+    * removed NT version;
+    * treat a hex keypad number < 256 as Unicode;
+    * use specific options for each prompt colour;
+    * expand multi-line macros using the command separator;
+    * LSTH uses ^ to find numbers and the redirection symbols;
+    * install as a batch file (cmdkey.cmd) to improve load time for "cmd /c";
+    * -e applies to any search, not just blank;
+    * improved prompt handling for macros & multiple commands;
+    * auto-recall can continue after a single failure; DelLeft will not delete;
+      don't continue after DelRight;
+    * show the file name and line number of a config file error;
+    * config file will be read as UTF-8, if the BOM is present;
+    + new function Execute to prevent adding the line to history;
+    + new function CopyFromPrev, similar to the original F3;
+    + new functions SwapWords & SwapArgs;
+    + new function UnderToggle and option -_ to change underscore behaviour;
+    + new functions Select, Cut & Paste, to provide a mini-clipboard;
+    + new functions EndWordLeft & EndWordRight, to move past the end of a word;
+    + new functions FindBack & FindForw do an incremental search;
+    + new functions Undo, Redo & Revert;
+    + custom configuration based on initial directory;
+    + provide a persistent history;
+    + copy the history from the parent instance (if not loading it);
+    + added colour for the prompt's base directory;
+    + recognise --version.
 
     v1.02, 23 July, 2010:
     - handle control characters better;
@@ -672,4 +813,4 @@
 
 
     ==========================
-    Jason Hood, 23 July, 2010.
+    Jason Hood, 5 August, 2011
