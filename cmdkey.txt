@@ -681,15 +681,18 @@
     terminated with the ENDM command.  Macro command lines may contain para-
     meters, which are designated by %N (N is a numeral from 0-9); %N* is
     shorthand for parameter N and all parameters after it; %* is shorthand
-    for %1*.  Note that it just copies the rest of the line from the desired
-    parameter, similar to symbols.
+    for %1*.  Macros will stop processing parameters at one of "<>|&"; if
+    found, the rest of the line will be appended after the definition of the
+    first line.
 
 	defm v unzip -c %* | view
 	v zipfile file_id.diz readme.txt
+	v zipfile *.txt |tde
 
     will become:
 
 	unzip -c zipfile file_id.diz readme.txt | view
+	unzip -c zipfile *.txt | view |tde
 
     and:
 
@@ -698,11 +701,14 @@
 	cd %1
 	endm
 	mcd newdir
+	mcd dir1 dir2 2>nul
 
     will become:
 
 	md newdir
 	cd newdir
+	md dir1 2>nul
+	cd dir1
 
     The name may be left out, in which case the macro will expand on an
     empty line.
@@ -755,7 +761,7 @@
 
     Legend: + added, - bug-fixed, * changed.
 
-    v2.00, 22 July to 5 August, 2011:
+    v2.00, 22 July to 6 August, 2011:
     - fixed file name completion with leading/trailing dot;
     - ensure input is from the console (prevents "set/p <nul" from crashing);
     - ignore input from non-commands (at least "set/p");
@@ -813,4 +819,4 @@
 
 
     ==========================
-    Jason Hood, 5 August, 2011
+    Jason Hood, 6 August, 2011

@@ -14,7 +14,7 @@
   - tweaks to completion;
   + read options from HKLM if they don't exist in HKCU.
 
-  v2.00, 22 July to 5 August, 2011:
+  v2.00, 22 July to 6 August, 2011:
   * compile cleanly with GCC 4;
   - fixed file name completion with leading/trailing dot;
   + new function Execute to prevent adding the line to history;
@@ -239,7 +239,6 @@ int	lastm;			// previous macro listed was multi-line
 COORD	lastc;			// cursor position of previous command
 
 BOOL	found_quote;		// true if get_string found a quote
-BOOL	macro_arg;		// true for get_string to find a macro argument
 
 FILE*	file;			// file containing commands
 UINT	filecp; 		// code page of the file
@@ -3214,14 +3213,12 @@ void get_macro_line( BOOL first )
       argnum   = (line.txt[pos] == '*') ? 2 : line.txt[pos] - '0' + 1;
       temp     = line;
       line.txt = macro_stk->name;
-      line.len = macro_stk->len;
-      macro_arg = TRUE;
+      line.len = LOWORD(macro_stk->len);
       arg = cnt = 0;
       do
       {
 	arg = get_string( arg + cnt, &cnt, TRUE );
       } while (--argnum);
-      macro_arg = FALSE;
       line = temp;
       var  = 2;
       if (line.txt[pos] != '*' && pos+1 < line.len && line.txt[pos+1] == '*')
@@ -3230,10 +3227,16 @@ void get_macro_line( BOOL first )
 	var = 3;
       }
       if (line.txt[pos] == '*')
-	cnt = macro_stk->len - arg;
+	cnt = LOWORD(macro_stk->len) - arg;
       pos -= var;
       pos += replace_chars( pos + 1, var, macro_stk->name + arg, cnt );
     }
+  }
+  if (first)
+  {
+    cnt = HIWORD(macro_stk->len) - LOWORD(macro_stk->len);
+    if (cnt)
+      insert_chars( pos, macro_stk->name + LOWORD(macro_stk->len), cnt );
   }
   un_escape( ARG_ESCAPE );
 
@@ -3598,6 +3601,7 @@ BOOL expand_macro( void )
 {
   PDefine m;
   DWORD   mac, end;
+  BOOL	  quote;
 
   mac = skip_blank( 0 );
   end = skip_nondelim( mac );
@@ -3609,6 +3613,34 @@ BOOL expand_macro( void )
   // Make a copy of the line in order to remember the arguments.
   if (!add_define( &macro_stk, 0, line.len ))
     return FALSE;
+
+  // Separate secondary commands and redirection.  For example, given the def-
+  // inition "defm ut unzip %* -dtemp", the command "ut zip |dnd" should expand
+  // to "unzip zip -dtemp |dnd" rather than "unzip zip |dnd -dtemp".
+  quote = FALSE;
+  for (; end < line.len; ++end)
+  {
+    if (quote)
+    {
+      if (is_quote( end ))
+	quote = FALSE;
+    }
+    else if (is_quote( end ))
+      quote = TRUE;
+    else if (line.txt[end] == ESCAPE)
+    {
+      if (end+1 < line.len)
+	++end;
+    }
+    else if (wcschr( BRACE_STOP, line.txt[end] ) ||
+	     (line.txt[end] == '2' && end+1 < line.len && line.txt[end+1] == '>'))
+    {
+      if (line.txt[end-1] == ' ')
+	--end;
+      break;
+    }
+  }
+  macro_stk->len = (line.len << 16) | end;
 
   macro_stk->line = m->line;
   get_macro_line( TRUE );
@@ -5048,10 +5080,6 @@ DWORD get_string( DWORD pos, LPDWORD cnt, BOOL keep )
       }
     }
     else if (isblank( line.txt[pos] ))
-      break;
-    // Stop at a command delimiter for macro arguments (well, assuming
-    // redirection occurs last).
-    else if (macro_arg && wcschr( BRACE_STOP, line.txt[pos] ))
       break;
   }
   if (!keep)
