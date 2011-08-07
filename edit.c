@@ -14,7 +14,7 @@
   - tweaks to completion;
   + read options from HKLM if they don't exist in HKCU.
 
-  v2.00, 22 July to 6 August, 2011:
+  v2.00, 22 July to 7 August, 2011:
   * compile cleanly with GCC 4;
   - fixed file name completion with leading/trailing dot;
   + new function Execute to prevent adding the line to history;
@@ -44,7 +44,8 @@
   * treat a hex keypad number < 256 as Unicode;
   - fixed substituting empty macro argument;
   * expand multiline macros using the command separator;
-  * LSTH uses ESCAPE to find numbers and search for the redirection symbols.
+  * LSTH uses ESCAPE to find numbers and search for the redirection symbols;
+  * delimit internal commands the same as a definition.
 */
 
 #include <stdio.h>
@@ -266,7 +267,7 @@ Line	envvar; 		// buffer for environment variable
 #define BRACE_STOP	L"<|>&"                 // brace expansion terminators
 #define BRACE_ESCAPE	L"{},^"                 // escaped brace exp. characters
 
-#define DEF_TERM	L" \t<|>/"              // definition delimiter
+#define DEF_TERM	L" \t<|>&/"             // definition delimiter
 
 #define VAR_ESCAPE	L"%^"                   // escaped variable characters
 #define ARG_ESCAPE	L"%*^"                  // escaped argument characters
@@ -3665,7 +3666,7 @@ BOOL internal_cmd( void )
   }
 
   pos = skip_blank( 0 );
-  cnt = skip_nonblank( pos ) - pos;
+  cnt = skip_nondelim( pos ) - pos;
   //if (cnt < MIN_CMD_LEN || cnt > MAX_CMD_LEN)
   if (cnt != CMD_LEN)
     return FALSE;
@@ -4178,7 +4179,7 @@ void execute_lsth( DWORD pos )
   if (!redirect( end ))
     return;
 
-  if (pos == line.len)
+  if (pos >= line.len)
   {
     for (h = history.next; h != &history; h = h->next)
       fprintf( lstout, "%.*S\n", (int)h->len, h->line );

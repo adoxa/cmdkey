@@ -10,7 +10,7 @@
   v1.02, 23 July, 2010:
   + add -I/-U to use HKLM.
 
-  v2.00, 22 July to 6 August, 2011:
+  v2.00, 22 July to 7 August, 2011:
   * compile cleanly with GCC 4;
   * slight improvements in finding parent process;
   * install as a batch file (cmdkey.cmd) to improve load time for "cmd /c";
@@ -27,7 +27,7 @@
   * removed NT version.
 */
 
-#define PDATE "6 August, 2011"
+#define PDATE "7 August, 2011"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
