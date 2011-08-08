@@ -10,7 +10,7 @@
   v1.02, 23 July, 2010:
   + add -I/-U to use HKLM.
 
-  v2.00, 22 July to 7 August, 2011:
+  v2.00, 22 July to 8 August, 2011:
   * compile cleanly with GCC 4;
   * slight improvements in finding parent process;
   * install as a batch file (cmdkey.cmd) to improve load time for "cmd /c";
@@ -24,10 +24,11 @@
   * test the config file is readable here, not in edit;
   + added --version;
   - fixed the status (using wrong value of enabled; future-proof);
-  * removed NT version.
+  * removed NT version
+  - fixed initial install.
 */
 
-#define PDATE "7 August, 2011"
+#define PDATE "8 August, 2011"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -63,7 +64,7 @@ void  GetStatus( DWORD id );
 void  Inject( LPPROCESS_INFORMATION pinfo );
 
 
-BOOL   installed	 __attribute__((dllimport));
+int    installed	 __attribute__((dllimport));
 DWORD  parent_pid	 __attribute__((dllimport));
 Option option		 __attribute__((dllimport));
 char   cfgname[MAX_PATH] __attribute__((dllimport));
@@ -113,7 +114,7 @@ int main( int argc, char* argv[] )
     status();
     return 0;
   }
-  update = (!installed && argc > 1);
+  update = (installed == -1);
   fname = (active) ? cmdname : cfgname;
   root = HKEY_CURRENT_USER;
   hstfile = FALSE;
@@ -363,7 +364,7 @@ int main( int argc, char* argv[] )
       GetFullPathName( hstname, sizeof(hstname), hstname, NULL );
     if (*fname)
       GetFullPathName( fname, sizeof(cfgname), cfgname, NULL );
-    else if (!installed)
+    else if (installed == -1)
     {
       // Let's just assume it ends with ".exe".
       j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) ) - 3;

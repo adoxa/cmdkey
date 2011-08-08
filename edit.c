@@ -14,7 +14,7 @@
   - tweaks to completion;
   + read options from HKLM if they don't exist in HKCU.
 
-  v2.00, 22 July to 7 August, 2011:
+  v2.00, 22 July to 8 August, 2011:
   * compile cleanly with GCC 4;
   - fixed file name completion with leading/trailing dot;
   + new function Execute to prevent adding the line to history;
@@ -45,7 +45,8 @@
   - fixed substituting empty macro argument;
   * expand multiline macros using the command separator;
   * LSTH uses ESCAPE to find numbers and search for the redirection symbols;
-  * delimit internal commands the same as a definition.
+  * delimit internal commands the same as a definition;
+  - fixed initial install.
 */
 
 #include <stdio.h>
@@ -88,7 +89,7 @@ FWriteConsoleW pWriteConsoleW;
 
 #define SHARED __attribute__((dllexport, shared, section(".share")))
 
-BOOL  SHARED installed	= FALSE;
+int   SHARED installed	= FALSE;
 BOOL  SHARED is_primary = FALSE;
 DWORD SHARED parent_pid = 0;
 
@@ -5624,7 +5625,8 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
       if (!installed)
       {
 	if (!ReadOptions( HKEY_CURRENT_USER ))
-	  ReadOptions( HKEY_LOCAL_MACHINE );
+	  if (!ReadOptions( HKEY_LOCAL_MACHINE ))
+	    installed = -1;
       }
       // Don't bother hooking into CMDkey.
       if (lpReserved)			// static initialisation

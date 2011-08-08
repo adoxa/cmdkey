@@ -761,7 +761,7 @@
 
     Legend: + added, - bug-fixed, * changed.
 
-    v2.00, 22 July to 7 August, 2011:
+    v2.00, 22 July to 8 August, 2011:
     - fixed file name completion with leading/trailing dot;
     - ensure input is from the console (prevents "set/p <nul" from crashing);
     - ignore input from non-commands (at least "set/p");
@@ -774,6 +774,7 @@
     - read the options even if not installed (to preserve for the install);
     - fixed updating the config file;
     - fixed the enabled status;
+    - fixed the initial install;
     * removed NT version;
     * treat a hex keypad number < 256 as Unicode;
     * use specific options for each prompt colour;
@@ -820,4 +821,4 @@
 
 
     ==========================
-    Jason Hood, 7 August, 2011
+    Jason Hood, 8 August, 2011
