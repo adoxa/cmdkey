@@ -47,6 +47,9 @@
   * LSTH uses ESCAPE to find numbers and search for the redirection symbols;
   * delimit internal commands the same as a definition;
   - fixed initial install.
+
+  16 September, 2011:
+  + new functions UpdateEnter & UpdateErase to replace history lines.
 */
 
 #include <stdio.h>
@@ -373,6 +376,8 @@ enum
   Undo, 		// undo previous function(s)
   Redo, 		// undo the undo
   Revert,		// undo/redo everything
+  UpdateEnter,		// accept line, replacing the existing one in history
+  UpdateErase,		// erase line but replace the existing one in history
   LastFunc
 };
 
@@ -389,7 +394,8 @@ const char const * func_str[] =
   "DelWordRight", "DelArg", "DelBegLine", "DelEndLine", "DelEndExec", "Erase",
   "StoreErase", "CmdSep", "Transpose", "SwapWords", "SwapArgs", "AutoRecall",
   "MacroToggle", "UnderToggle", "VarSubst", "Enter", "Execute", "Wipe",
-  "InsOvr", "Play", "Record", "Undo", "Redo", "Revert"
+  "InsOvr", "Play", "Record", "Undo", "Redo", "Revert", "UpdateEnter",
+  "UpdateErase"
 };
 
 
@@ -452,6 +458,8 @@ const Cfg cfg[] = {
   f( Transpose	  )
   f( UnderToggle  )
   f( Undo	  )
+  f( UpdateEnter  )
+  f( UpdateErase  )
   f( VarSubst	  )
   f( Wipe	  )
   f( WordLeft	  )
@@ -505,7 +513,7 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
   // plain	shift		control 	shift+control
   { DelLeft,	DelLeft,	DelWordLeft,	DelArg, 	},// Backspace
   { Cycle,	CycleBack,	List,		ListDir,	},// Tab
-  { Enter,	Enter,		Execute,	Ignore, 	},// Enter
+  { Enter,	UpdateEnter,	Execute,	Ignore, 	},// Enter
   { Erase,	Erase,		Ignore, 	Ignore, 	},// Escape
 
   // plain	shift		control 	alt
@@ -538,7 +546,7 @@ char ctrl_key_table[][2] = {
   { DelRight,		ListDir,	}, // ^D
   { EndLine,		Ignore, 	}, // ^E
   { CharRight,		List,		}, // ^F
-  { StoreErase, 	Ignore, 	}, // ^G
+  { StoreErase, 	UpdateErase,	}, // ^G
   { DelLeft,		Ignore, 	}, // ^H
   { Cycle,		CycleBack,	}, // ^I
   { VarSubst,		Ignore, 	}, // ^J
@@ -1551,6 +1559,10 @@ void edit_line( void )
 	remove_chars( pos, line.len - pos );
       break;
 
+      case UpdateErase:
+	if (hist != &history)
+	  remove_from_history( hist );
+
       case StoreErase:
 	add_to_history( TRUE );
 	hist = &history;
@@ -1566,8 +1578,14 @@ void edit_line( void )
 
       case DelEndExec:
 	remove_chars( pos, line.len - pos );
+	goto accept_line;
+
+      case UpdateEnter:
+	if (hist != &history)
+	  remove_from_history( hist );
 
       case Enter:
+      accept_line:
 	add_to_history( TRUE );
 	done = TRUE;
       break;
