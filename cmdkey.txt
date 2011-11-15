@@ -761,6 +761,10 @@
 
 	path %CD%^;%path%
 
+    When installing both CMDkey and ANSICON, CMDkey must be installed first.
+    If CMDkey is started after ANSICON, CMD.EXE's output will no longer be
+    processed by ANSICON.
+
 
     =======
     History
@@ -768,7 +772,7 @@
 
     Legend: + added, - bug-fixed, * changed.
 
-    v2.00, 22 July to 8 August & 16 September, 2011:
+    v2.00, 22 July to 8 August, 16 September & 15 November, 2011:
     - fixed file name completion with leading/trailing dot;
     - ensure input is from the console (prevents "set/p <nul" from crashing);
     - ignore input from non-commands (at least "set/p");
@@ -828,5 +832,5 @@
     + first release.
 
 
-    ==============================
-    Jason Hood, 16 September, 2011
+    =============================
+    Jason Hood, 15 November, 2011

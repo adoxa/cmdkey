@@ -50,6 +50,10 @@
 
   16 September, 2011:
   + new functions UpdateEnter & UpdateErase to replace history lines.
+
+  15 November, 2011:
+  * go back to calling the normal import (explicitly require ANSICON to be
+    installed after CMDkey).
 */
 
 #include <stdio.h>
@@ -79,13 +83,6 @@ void DEBUGSTR( char* szFormat, ... )	// sort of OutputDebugStringf
 #else
 #define DEBUGSTR(...)
 #endif
-
-
-typedef BOOL (WINAPI *FReadConsoleW)( HANDLE, LPVOID, DWORD, LPDWORD, LPVOID );
-typedef BOOL (WINAPI *FWriteConsoleW)( HANDLE, CONST VOID*, DWORD, LPDWORD, LPVOID );
-
-FReadConsoleW  pReadConsoleW;
-FWriteConsoleW pWriteConsoleW;
 
 
 // ========== Global variables and constants
@@ -743,7 +740,8 @@ void  make_relative( PWSTR, PWSTR ); // make an absolute path relative
 
 // Utility
 
-#define isword(  ch ) (IsCharAlphaNumericW( ch ) || (ch == '_' && option.underscore))
+#define isword(  ch ) (IsCharAlphaNumericW( ch ) || \
+		       (ch == '_' && option.underscore))
 #define isblank( ch ) (ch == ' ' || ch == '\t')
 
 int   search_cfg( PCWSTR, DWORD, const Cfg [], int ); // find config string
@@ -1543,7 +1541,8 @@ void edit_line( void )
       do_cut:
 	  if (selected.txt)
 	    free( selected.txt );
-	  selected.txt = new_txt( line.txt + start, selected.len = end - start );
+	  selected.len = end - start;
+	  selected.txt = new_txt( line.txt + start, selected.len );
 	  if (selected.txt == NULL)
 	    selected.len = 0;
 	}
@@ -2267,7 +2266,7 @@ void display_prompt( void )
   if (kbd)
   {
     WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
-    pWriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
+    WriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
     GetConsoleScreenBufferInfo( hConOut, &screen );
     if (*p_attr)
     {
@@ -2735,10 +2734,12 @@ int find_files( int* pos, int dirs )
     else
       extlen = get_env_var( L"FIGNORE", FIGNORE );
 
-    match = match_file(line.txt+path_pos, envvar.txt,extlen, dirs,exe, &fh, &fd);
+    match = match_file( line.txt+path_pos, envvar.txt, extlen, dirs, exe,
+			&fh, &fd );
     // If nothing was found try again without the ignore list.
     if (!match && !exe && !dirs)
-      match = match_file(line.txt+path_pos, NULL,extlen=0, FALSE,FALSE, &fh, &fd);
+      match = match_file( line.txt+path_pos, NULL, extlen = 0, FALSE, FALSE,
+			  &fh, &fd );
     prefix = (!match || !wild) ? -1 : -2;
     fname_max = fname_cnt = 0;
     while (match)
@@ -2747,7 +2748,7 @@ int find_files( int* pos, int dirs )
       {
 	// Ensure the name matches what was typed, to overcome Windows foibles
 	// (like "file." matching "file" and ".f" matching "f").
-	if (_wcsnicmp( fd.cFileName, line.txt + fname_pos, *pos - fname_pos ) != 0)
+	if (_wcsnicmp( fd.cFileName, line.txt+fname_pos, *pos-fname_pos ) != 0)
 	  goto next;
       }
 
@@ -2772,7 +2773,7 @@ int find_files( int* pos, int dirs )
 	  for (beg = 0; beg < prefix; ++beg)
 	  {
 	    if ((WCHAR)(DWORD)CharLowerW( (PWCHAR)(DWORD)f->line[beg] ) !=
-		(WCHAR)(DWORD)CharLowerW( (PWCHAR)(DWORD)fname->next->line[beg] ))
+		(WCHAR)(DWORD)CharLowerW((PWCHAR)(DWORD)fname->next->line[beg]))
 	      break;
 	  }
 	  prefix = beg;
@@ -3653,7 +3654,8 @@ BOOL expand_macro( void )
 	++end;
     }
     else if (wcschr( BRACE_STOP, line.txt[end] ) ||
-	     (line.txt[end] == '2' && end+1 < line.len && line.txt[end+1] == '>'))
+	     (line.txt[end] == '2' && end+1 < line.len
+				   && line.txt[end+1] == '>'))
     {
       if (line.txt[end-1] == ' ')
 	--end;
@@ -5361,8 +5363,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     return TRUE;
   }
 
-  return pReadConsoleW( hConsoleInput, lpBuffer, nNumberOfCharsToRead,
-			lpNumberOfCharsRead, lpReserved );
+  return ReadConsoleW( hConsoleInput, lpBuffer, nNumberOfCharsToRead,
+		       lpNumberOfCharsRead, lpReserved );
 }
 
 
@@ -5413,8 +5415,8 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
     }
   }
 
-  rc = pWriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
-		       lpNumberOfCharsWritten, lpReserved );
+  rc = WriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
+		      lpNumberOfCharsWritten, lpReserved );
 
   if (erase_prompt)
   {
@@ -5465,9 +5467,8 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 
 typedef struct
 {
-  PSTR	name;
-  PROC	newfunc;
-  PROC* oldfunc;
+  PSTR name;
+  PROC newfunc;
 } HookFn, *PHookFn;
 
 
@@ -5566,9 +5567,6 @@ BOOL HookAPIOneMod(
 	VirtualProtect( &pThunk->u1.Function, sizeof(PVOID),
 			PAGE_READWRITE, &flOldProtect );
 
-	// Store the original function.
-	*hook->oldfunc = (PROC)pThunk->u1.Function;
-
 	// Overwrite the original address with the address of the new function
 	pThunk->u1.Function = (DWORD)hook->newfunc;
 
@@ -5587,9 +5585,9 @@ BOOL HookAPIOneMod(
 // ========== Initialisation
 
 HookFn Hooks[] = {
-  { "ReadConsoleW",  (PROC)MyReadConsoleW,  (PROC*)&pReadConsoleW  },
-  { "WriteConsoleW", (PROC)MyWriteConsoleW, (PROC*)&pWriteConsoleW },
-  { NULL, NULL, NULL }
+  { "ReadConsoleW",  (PROC)MyReadConsoleW  },
+  { "WriteConsoleW", (PROC)MyWriteConsoleW },
+  { NULL, NULL }
 };
 
 
@@ -5621,7 +5619,7 @@ BOOL ReadHistoryName( HKEY root )
   if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
   {
     exist = sizeof(local.hstname);
-    RegQueryValueEx( key, "Hstfile", NULL, NULL, (LPBYTE)local.hstname, &exist );
+    RegQueryValueEx( key, "Hstfile", NULL,NULL, (LPBYTE)local.hstname, &exist );
     RegCloseKey( key );
     return TRUE;
   }

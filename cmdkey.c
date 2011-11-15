@@ -28,7 +28,7 @@
   - fixed initial install.
 */
 
-#define PDATE "16 September, 2011"
+#define PDATE "15 November, 2011"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
