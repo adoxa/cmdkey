@@ -3,7 +3,7 @@
 
 			  Copyright 2006-11 Jason Hood
 
-			    Freeware.  Version 2.00
+			    Freeware.  Version 2.01
 
 
     ===========
@@ -761,16 +761,15 @@
 
 	path %CD%^;%path%
 
-    When installing both CMDkey and ANSICON, CMDkey must be installed first.
-    If CMDkey is started after ANSICON, CMD.EXE's output will no longer be
-    processed by ANSICON.
-
 
     =======
     History
     =======
 
     Legend: + added, - bug-fixed, * changed.
+
+    v2.01, 8 December, 2011:
+    * fully work with ANSICON.
 
     v2.00, 22 July to 8 August, 16 September & 15 November, 2011:
     - fixed file name completion with leading/trailing dot;

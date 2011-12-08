@@ -54,6 +54,9 @@
   15 November, 2011:
   * go back to calling the normal import (explicitly require ANSICON to be
     installed after CMDkey).
+
+  v2.01, 8 December, 2011:
+  * copy CMD.EXE's imports into edit.dll (finally work with ANSICON).
 */
 
 #include <stdio.h>
@@ -5467,8 +5470,9 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 
 typedef struct
 {
-  PSTR name;
-  PROC newfunc;
+  PSTR	name;
+  DWORD newfunc;
+  DWORD oldfunc;
 } HookFn, *PHookFn;
 
 
@@ -5568,7 +5572,15 @@ BOOL HookAPIOneMod(
 			PAGE_READWRITE, &flOldProtect );
 
 	// Overwrite the original address with the address of the new function
-	pThunk->u1.Function = (DWORD)hook->newfunc;
+	if (hook->oldfunc)
+	{
+	  pThunk->u1.Function = hook->oldfunc;
+	}
+	else
+	{
+	  hook->oldfunc = pThunk->u1.Function;
+	  pThunk->u1.Function = hook->newfunc;
+	}
 
 	// Put the page attributes back the way they were.
 	VirtualProtect( &pThunk->u1.Function, sizeof(PVOID),
@@ -5585,9 +5597,9 @@ BOOL HookAPIOneMod(
 // ========== Initialisation
 
 HookFn Hooks[] = {
-  { "ReadConsoleW",  (PROC)MyReadConsoleW  },
-  { "WriteConsoleW", (PROC)MyWriteConsoleW },
-  { NULL, NULL }
+  { "ReadConsoleW",  (DWORD)MyReadConsoleW,  0 },
+  { "WriteConsoleW", (DWORD)MyWriteConsoleW, 0 },
+  { NULL, 0, 0 }
 };
 
 
@@ -5651,6 +5663,8 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
 
       if (HookAPIOneMod( GetModuleHandle( NULL ), Hooks ))
       {
+	HookAPIOneMod( hInstance, Hooks );
+
 	// This is rather awkward.  I want to read the config file first, then
 	// the history.  But history lines in the config should have precedence
 	// over the saved history, so I need to read the saved history first.
