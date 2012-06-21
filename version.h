@@ -4,6 +4,6 @@
   Jason Hood, 30 July, 2011.
 */
 
-#define PVERS "2.01"    // string
-#define PVERX 0x201	// hex
-#define PVERB 2,0,1,0	// binary (resource)
+#define PVERS "2.10"    // string
+#define PVERX 0x210	// hex
+#define PVERB 2,1,0,0	// binary (resource)

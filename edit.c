@@ -57,6 +57,9 @@
 
   v2.01, 8 December, 2011:
   * copy CMD.EXE's imports into edit.dll (finally work with ANSICON).
+
+  v2.10, 14 & 15 June, 2012:
+  * if there's no parent, copy history from primary.
 */
 
 #include <stdio.h>
@@ -93,7 +96,7 @@ void DEBUGSTR( char* szFormat, ... )	// sort of OutputDebugStringf
 #define SHARED __attribute__((dllexport, shared, section(".share")))
 
 int   SHARED installed	= FALSE;
-BOOL  SHARED is_primary = FALSE;
+DWORD SHARED primary_id = 0;
 DWORD SHARED parent_pid = 0;
 
 Option SHARED option = {
@@ -195,7 +198,7 @@ typedef struct history_s
 
 
 // Function prototype for an internal command.
-typedef void (*IntFunc( DWORD ));
+typedef void (*IntFunc)( DWORD );
 
 
 // Structure for undo/redo.
@@ -611,6 +614,7 @@ void execute_rsth( DWORD );
 void execute_rstm( DWORD );
 void execute_rsts( DWORD );
 
+#ifndef _WIN64
 const Cfg internal[] = {
   { L"defa",    (int)execute_defa },    // define association
   { L"defk",    (int)execute_defk },    // define key
@@ -631,6 +635,49 @@ const Cfg internal[] = {
   { L"rstm",    (int)execute_rstm },    // reset macros
   { L"rsts",    (int)execute_rsts },    // reset symbols
 };
+#else
+const IntFunc internal_funcs[] = {
+  execute_defa,
+  execute_defk,
+  execute_defm,
+  execute_defs,
+  execute_dela,
+  execute_delh,
+  execute_delk,
+  execute_delm,
+  execute_dels,
+  execute_lsta,
+  execute_lsth,
+  execute_lstk,
+  execute_lstm,
+  execute_lsts,
+  execute_rsta,
+  execute_rsth,
+  execute_rstm,
+  execute_rsts,
+};
+
+const Cfg internal[] = {
+  { L"defa",     0 },
+  { L"defk",     1 },
+  { L"defm",     2 },
+  { L"defs",     3 },
+  { L"dela",     4 },
+  { L"delh",     5 },
+  { L"delk",     6 },
+  { L"delm",     7 },
+  { L"dels",     8 },
+  { L"lsta",     9 },
+  { L"lsth",    10 },
+  { L"lstk",    11 },
+  { L"lstm",    12 },
+  { L"lsts",    13 },
+  { L"rsta",    14 },
+  { L"rsth",    15 },
+  { L"rstm",    16 },
+  { L"rsts",    17 },
+};
+#endif
 
 //#define MIN_CMD_LEN 4
 //#define MAX_CMD_LEN 4
@@ -2420,7 +2467,7 @@ PHistory find_history( PHistory hist, int* pos, DWORD len, BOOL back )
 }
 
 
-// Create the initial history from the parent process' history.
+// Create the initial history from the parent or primary process' history.
 void copy_parent_history( void )
 {
   HANDLE   parent;
@@ -2429,25 +2476,34 @@ void copy_parent_history( void )
   PHistory cur;
 
   parent = OpenProcess( PROCESS_VM_READ, FALSE, parent_pid );
-  if (!parent)
-    return;
-
-  if (ReadProcessMemory( parent, &local, &version, sizeof(int), NULL ) &&
-      version == PVERX)
+  if (!parent ||
+      !ReadProcessMemory( parent, &local, &version, sizeof(int), NULL ) ||
+      version != PVERX)
   {
-    make_line( 0 );
-    ReadProcessMemory( parent, &history, &hist, sizeof(History), NULL );
-    while (hist.next != &history)
+    CloseHandle( parent );
+    parent = OpenProcess( PROCESS_VM_READ, FALSE, primary_id );
+    if (!parent)
+      return;
+    if (!ReadProcessMemory( parent, &local, &version, sizeof(int), NULL ) ||
+	version != PVERX)
     {
-      cur = hist.next;
-      ReadProcessMemory( parent, cur, &hist, sizeof(History), NULL );
-      if (!make_line( hist.len ))
-	break;
-      ReadProcessMemory( parent, cur + 1, line.txt, WSZ(line.len), NULL );
-      add_to_history( FALSE );
+      CloseHandle( parent );
+      return;
     }
-    make_line( ~0 );
   }
+
+  make_line( 0 );
+  ReadProcessMemory( parent, &history, &hist, sizeof(History), NULL );
+  while (hist.next != &history)
+  {
+    cur = hist.next;
+    ReadProcessMemory( parent, cur, &hist, sizeof(History), NULL );
+    if (!make_line( hist.len ))
+      break;
+    ReadProcessMemory( parent, cur + 1, line.txt, WSZ(line.len), NULL );
+    add_to_history( FALSE );
+  }
+  make_line( ~0 );
 
   CloseHandle( parent );
 }
@@ -2775,8 +2831,8 @@ int find_files( int* pos, int dirs )
 	{
 	  for (beg = 0; beg < prefix; ++beg)
 	  {
-	    if ((WCHAR)(DWORD)CharLowerW( (PWCHAR)(DWORD)f->line[beg] ) !=
-		(WCHAR)(DWORD)CharLowerW((PWCHAR)(DWORD)fname->next->line[beg]))
+	    if ((WCHAR)(DWORD_PTR)CharLowerW( (PWCHAR)(DWORD_PTR)f->line[beg] ) !=
+		(WCHAR)(DWORD_PTR)CharLowerW((PWCHAR)(DWORD_PTR)fname->next->line[beg]))
 	      break;
 	  }
 	  prefix = beg;
@@ -3699,11 +3755,19 @@ BOOL internal_cmd( void )
   if (func == -1)
     return FALSE;
 
+#ifndef _WIN64
   if (kbd && func != (int)execute_lsth)
+#else
+  if (kbd && internal_funcs[func] != execute_lsth)
+#endif
     un_escape( NULL );
 
   pos = skip_blank( pos + cnt );
-  ((IntFunc*)func)( pos );
+#ifndef _WIN64
+  ((IntFunc)func)( pos );
+#else
+  (internal_funcs[func])( pos );
+#endif
 
   return TRUE;
 }
@@ -5466,13 +5530,13 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 // - Jeffrey Richter ~ Programming Applications for Microsoft Windows 4th ed.
 
 // Macro for adding pointers/DWORDs together without C arithmetic interfering
-#define MakeVA( cast, addValue ) (cast)((DWORD)(pDosHeader)+(DWORD)(addValue))
+#define MakeVA( cast, addValue ) (cast)((DWORD_PTR)(pDosHeader)+(DWORD_PTR)(addValue))
 
 typedef struct
 {
   PSTR	name;
-  DWORD newfunc;
-  DWORD oldfunc;
+  DWORD_PTR newfunc;
+  DWORD_PTR oldfunc;
 } HookFn, *PHookFn;
 
 
@@ -5597,8 +5661,8 @@ BOOL HookAPIOneMod(
 // ========== Initialisation
 
 HookFn Hooks[] = {
-  { "ReadConsoleW",  (DWORD)MyReadConsoleW,  0 },
-  { "WriteConsoleW", (DWORD)MyWriteConsoleW, 0 },
+  { "ReadConsoleW",  (DWORD_PTR)MyReadConsoleW,  0 },
+  { "WriteConsoleW", (DWORD_PTR)MyWriteConsoleW, 0 },
   { NULL, 0, 0 }
 };
 
@@ -5669,18 +5733,21 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
 	// the history.  But history lines in the config should have precedence
 	// over the saved history, so I need to read the saved history first.
 	// Specifying another history in the config will reset this one.
-	if (!is_primary)
+	if (primary_id == 0)
 	{
 	  if (!ReadHistoryName( HKEY_CURRENT_USER ))
 	    ReadHistoryName( HKEY_LOCAL_MACHINE );
 	  read_history();
 	}
+	else
+	  copy_parent_history();
 	if (*cfgname)
 	  read_cmdfile( cfgname );
-	if (!is_primary && !save_history)
-	  save_history = primary = is_primary = TRUE;
-	if (!save_history)
-	  copy_parent_history();
+	if (primary_id == 0 && !save_history)
+	{
+	  save_history = primary = TRUE;
+	  primary_id = GetCurrentProcessId();
+	}
 	SetConsoleCtrlHandler( (PHANDLER_ROUTINE)ctrl_break, TRUE );
       }
     break;
@@ -5690,7 +5757,7 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
       {
 	write_history();
 	if (primary)
-	  is_primary = FALSE;
+	  primary_id = 0;
       }
     break;
   }

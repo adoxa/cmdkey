@@ -26,9 +26,15 @@
   - fixed the status (using wrong value of enabled; future-proof);
   * removed NT version
   - fixed initial install.
+
+  v2.10, 14 & 15 June, 2012:
+  * modified injection (use VirtualAllocEx method, not stack);
+  + 64-bit version;
+  - search for the local export (improved future-proofing);
+  - install/uninstall will replace/remove a string containing "cmdkey".
 */
 
-#define PDATE "8 December, 2011"
+#define PDATE "15 June, 2012"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -59,8 +65,8 @@ void help( void );
 
 BOOL  find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32, LPPROCESSENTRY32 );
 DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo );
-BOOL  IsInstalled( DWORD id );
-void  GetStatus( DWORD id );
+BOOL  IsInstalled( DWORD id, PBYTE* base );
+void  GetStatus( DWORD id, PBYTE base );
 void  Inject( LPPROCESS_INFORMATION pinfo );
 
 
@@ -76,6 +82,7 @@ Status local		 __attribute__((dllimport));
 int main( int argc, char* argv[] )
 {
   PROCESS_INFORMATION pinfo;
+  PBYTE  base;
   BOOL	 active, update;
   char*  arg;
   char*  end;
@@ -107,10 +114,10 @@ int main( int argc, char* argv[] )
     }
   }
 
-  active = IsInstalled( GetParentProcessInfo( &pinfo ) );
+  active = IsInstalled( GetParentProcessInfo( &pinfo ), &base );
   if (active && argc == 1)
   {
-    GetStatus( pinfo.dwProcessId );
+    GetStatus( pinfo.dwProcessId, base );
     status();
     return 0;
   }
@@ -268,10 +275,20 @@ int main( int argc, char* argv[] )
 	    if (exist > sizeof(TCHAR))
 	    {
 	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
-	      if (!strstr( opt, cmdkey + 1 ))
+	      cmdpos = strstr( opt, "cmdkey" );
+	      if (!cmdpos)
 	      {
 		strcpy( opt + --exist, cmdkey );
 		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist + len );
+	      }
+	      else
+	      {
+		char* end = cmdpos + 6;
+		while (cmdpos != opt && *--cmdpos != '"') ;
+		while (*end != '\0' && *end++ != '"') ;
+		memmove( cmdpos + len - 1, end, exist - (end - opt) );
+		memcpy( cmdpos, cmdkey + 1, len - 1 );
+		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, strlen( opt ) + 1 );
 	      }
 	    }
 	    else
@@ -288,10 +305,6 @@ int main( int argc, char* argv[] )
 	    if (*arg == 'U')
 	      root = HKEY_LOCAL_MACHINE;
 	    // Remove CMDkey from CMD.EXE's AutoRun setting.
-	    len = GetModuleFileName( NULL, cmdkey + 1, sizeof(cmdkey) - 2 ) + 2;
-	    strlwr( cmdkey + 1 );
-	    cmdkey[0] = '"';
-	    strcpy( cmdkey + len - 4, "cmd\"" );
 	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
 			    KEY_ALL_ACCESS, NULL, &key, &exist );
 	    exist = 0;
@@ -305,9 +318,13 @@ int main( int argc, char* argv[] )
 		return 1;
 	      }
 	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
-	      cmdpos = strstr( opt, cmdkey );
+	      cmdpos = strstr( opt, "cmdkey" );
 	      if (cmdpos)
 	      {
+		len = cmdpos - opt + 6;
+		while (cmdpos != opt && *--cmdpos != '"') ;
+		while (opt[len] != '\0' && opt[len++] != '"') ;
+		len -= cmdpos - opt;
 		if (cmdpos == opt && exist == len + 1)
 		  RegDeleteValue( key, AUTORUN );
 		else
@@ -401,7 +418,6 @@ int main( int argc, char* argv[] )
     pinfo.hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE, pinfo.dwProcessId );
     pinfo.hThread = OpenThread( THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
 				THREAD_SET_CONTEXT, FALSE, pinfo.dwThreadId );
-    SuspendThread( pinfo.hThread );
     Inject( &pinfo );
     CloseHandle( pinfo.hThread );
     CloseHandle( pinfo.hProcess );
@@ -422,12 +438,10 @@ void status( void )
   {
     printf( "This CMDkey is version %x.%.2x, but installed edit.dll is ",
 	    PVERX >> 8, PVERX & 0xFF );
-    if (local.version >= 0x102)
-      printf( "%x.%.2x.\n", local.version >> 8, local.version & 0xFF );
-    else if (local.version == 0x101)
-      puts( "1.00 or 1.01." );
-    else
+    if (local.version == 0)
       puts( "unknown." );
+    else
+      printf( "%x.%.2x.\n", local.version >> 8, local.version & 0xFF );
     return;
   }
 
@@ -545,11 +559,13 @@ DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo )
 
 
 // Determine if CMDkey is already installed in the parent.
-BOOL IsInstalled( DWORD id )
+BOOL IsInstalled( DWORD id, PBYTE* base )
 {
   HANDLE	hModuleSnap;
   MODULEENTRY32 me;
   BOOL		fOk;
+
+  *base = NULL;
 
   // Take a snapshot of all modules in the current process.
   hModuleSnap = CreateToolhelp32Snapshot( TH32CS_SNAPMODULE, id );
@@ -568,7 +584,10 @@ BOOL IsInstalled( DWORD id )
        fOk = Module32Next( hModuleSnap, &me ))
   {
     if (stricmp( me.szModule, "edit.dll" ) == 0)
+    {
+      *base = me.modBaseAddr;
       break;
+    }
   }
   CloseHandle( hModuleSnap );
 
@@ -577,86 +596,183 @@ BOOL IsInstalled( DWORD id )
 
 
 // Read the local variables from the parent process.
-void GetStatus( DWORD id )
+void GetStatus( DWORD id, PBYTE base )
 {
+  Status* plocal = NULL;
   HANDLE parent = OpenProcess( PROCESS_VM_READ, FALSE, id );
+  local.version = 0;
   if (parent)
   {
-    if (!ReadProcessMemory( parent, &local, &local, sizeof(local), NULL ))
-      local.version = 0x101;
-    else if (HIWORD(local.version))
-      local.version = 0x102;
+    PIMAGE_DOS_HEADER	    pDosHeader;
+    PIMAGE_NT_HEADERS	    pNTHeader;
+    PIMAGE_EXPORT_DIRECTORY pExportDir;
+    PSTR* ExportNameTable;
+    PBYTE ExportBase;
+    DWORD ord;
+    BYTE  buf[512];
+
+    // Locate the "local" export.
+#define MakeVA( cast, base, addValue ) \
+  (cast)((DWORD_PTR)(base) + (DWORD_PTR)(addValue))
+    ReadProcessMemory( parent, base, buf, sizeof(buf), NULL );
+    pDosHeader = (PIMAGE_DOS_HEADER)buf;
+    pNTHeader = MakeVA( PIMAGE_NT_HEADERS, pDosHeader, pDosHeader->e_lfanew );
+    pExportDir = MakeVA( PIMAGE_EXPORT_DIRECTORY, base,
+			 pNTHeader->OptionalHeader.
+			  DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].
+			   VirtualAddress );
+
+    // Bail out if the RVA of the exports section is 0 (it doesn't exist).
+    // This should only happen if there's another edit.dll injected before us.
+    if ((PBYTE)pExportDir == base)
+    {
+      CloseHandle( parent );
+      return;
+    }
+
+    ReadProcessMemory( parent, pExportDir, buf, sizeof(buf), NULL );
+    ExportBase = buf + (base - (PBYTE)pExportDir);
+    pExportDir = (PIMAGE_EXPORT_DIRECTORY)buf;
+    ExportNameTable = MakeVA( PSTR*, ExportBase, pExportDir->AddressOfNames );
+    for (ord = pExportDir->NumberOfNames; (int)--ord >= 0;)
+    {
+      PSTR pszExportName = MakeVA( PSTR, ExportBase, ExportNameTable[ord] );
+      if (strcmp( pszExportName, "local" ) == 0)
+      {
+	WORD* ExportOrdinalTable = MakeVA( WORD*, ExportBase,
+					   pExportDir->AddressOfNameOrdinals );
+	ord = ExportOrdinalTable[ord];
+	DWORD* ExportFunctionTable = MakeVA( DWORD*, ExportBase,
+					     pExportDir->AddressOfFunctions );
+	plocal = MakeVA( Status*, base, ExportFunctionTable[ord] );
+	break;
+      }
+    }
+    if (plocal)
+      ReadProcessMemory( parent, plocal, &local, sizeof(local), NULL );
+    else
+    {
+      // Read the timestamp in the header to determine the released version.
+      DWORD tstamp;
+      ReadProcessMemory( parent, base + 0x88, &tstamp, 4, NULL );
+      switch (tstamp)
+      {
+	case 0x458cdf26: local.version = 0x100; break;
+	case 0x45ff9109: local.version = 0x101; break;
+	case 0x4c494fe9: local.version = 0x102; break;
+      }
+    }
     CloseHandle( parent );
   }
-  else
-    local.version = 0;
 }
 
 
-struct InjectData
-{
-  DWORD retaddr;		// original EIP to return to
-  DWORD dlladdr;		// address of DLL filename
-  DWORD funaddr;		// address of LoadLibraryA
-  char	code[27];		// the actual code to load the library
-  char	dllname[MAX_PATH];	// DLL filename
-};
-
-static struct InjectData inj = { 0, 0, 0, {
-  0x50, 			// push eax
-  0x53, 			// push ebx
-  0x51, 			// push ecx
-  0x52, 			// push edx
-  0x56, 			// push esi
-  0x57, 			// push edi
-  0x55, 			// push ebp
-  0x9c, 			// pushfd
-  0xff, 0x74, 0x24, 0x24,	// push [esp + 8]
-  0xff, 0x54, 0x24, 0x2c,	// call [esp + c]
-  0x9d, 			// popfd
-  0x5d, 			// pop	ebp
-  0x5f, 			// pop	edi
-  0x5e, 			// pop	esi
-  0x5a, 			// pop	edx
-  0x59, 			// pop	ecx
-  0x5b, 			// pop	ebx
-  0x58, 			// pop	eax
-  0xc2, 0x08, 0x00		// ret	8
-}, { 0 } };
-
-
-// Inject code into the target process to load our DLL.  The target thread
-// should be suspended on entry; it is restarted on exit.
+// Inject code into the target process to load our DLL.
 void Inject( LPPROCESS_INFORMATION pinfo )
 {
-  CONTEXT context;
+  char	  dll[MAX_PATH];
   char*   name;
   char*   path;
-  DWORD   size;
+  CONTEXT context;
+  DWORD   len;
+  LPVOID  mem;
+  union
+  {
+    PBYTE      pB;
+    PDWORD_PTR pL;
+  } ip;
 
-  context.ContextFlags = CONTEXT_FULL;
-  GetThreadContext( pinfo->hThread, &context );
+#ifdef _WIN64
+  #define CODESIZE 92
+  static BYTE code[CODESIZE+MAX_PATH] = {
+	0,0,0,0,0,0,0,0,	   // original rip
+	0,0,0,0,0,0,0,0,	   // LoadLibraryA
+	0x9C,			   // pushfq
+	0x50,			   // push  rax
+	0x51,			   // push  rcx
+	0x52,			   // push  rdx
+	0x53,			   // push  rbx
+	0x55,			   // push  rbp
+	0x56,			   // push  rsi
+	0x57,			   // push  rdi
+	0x41,0x50,		   // push  r8
+	0x41,0x51,		   // push  r9
+	0x41,0x52,		   // push  r10
+	0x41,0x53,		   // push  r11
+	0x41,0x54,		   // push  r12
+	0x41,0x55,		   // push  r13
+	0x41,0x56,		   // push  r14
+	0x41,0x57,		   // push  r15
+	0x48,0x83,0xEC,0x28,	   // sub   rsp, 40
+	0x48,0x8D,0x0D,41,0,0,0,   // lea   ecx, "path\to\edit.dll"
+	0xFF,0x15,-49,-1,-1,-1,    // call  LoadLibraryA
+	0x48,0x83,0xC4,0x28,	   // add   rsp, 40
+	0x41,0x5F,		   // pop   r15
+	0x41,0x5E,		   // pop   r14
+	0x41,0x5D,		   // pop   r13
+	0x41,0x5C,		   // pop   r12
+	0x41,0x5B,		   // pop   r11
+	0x41,0x5A,		   // pop   r10
+	0x41,0x59,		   // pop   r9
+	0x41,0x58,		   // pop   r8
+	0x5F,			   // pop   rdi
+	0x5E,			   // pop   rsi
+	0x5D,			   // pop   rbp
+	0x5B,			   // pop   rbx
+	0x5A,			   // pop   rdx
+	0x59,			   // pop   rcx
+	0x58,			   // pop   rax
+	0x9D,			   // popfq
+	0xFF,0x25,-91,-1,-1,-1,    // jmp   original Rip
+	0,			   // dword alignment for LLA, fwiw
+  };
+#else
+  DWORD_PTR LLA;
+  DWORD   mem32;
+  #define CODESIZE 20
+  BYTE	  code[CODESIZE+MAX_PATH];
+#endif
 
-  GetModuleFileNameA( NULL, inj.dllname, sizeof(inj.dllname) );
-  for (name = path = inj.dllname; *path; ++path)
+  len = GetModuleFileName( NULL, dll, MAX_PATH ) + 1;
+  for (name = path = dll; *path; ++path)
     if (*path == '\\')
       name = path + 1;
-  lstrcpyA( name, "edit.dll" );
+  strcpy( name, "edit.dll" );
+  CopyMemory( code + CODESIZE, dll, len );
+  len += CODESIZE;
 
-  size = (sizeof(inj)-sizeof(inj.dllname) + lstrlenA(inj.dllname) + 1 + 3) & ~3;
-  *(unsigned short*)(inj.code+sizeof(inj.code)-2) = (unsigned short)(size-4);
+  SuspendThread( pinfo->hThread );
+  context.ContextFlags = CONTEXT_CONTROL;
+  GetThreadContext( pinfo->hThread, &context );
+  mem = VirtualAllocEx( pinfo->hProcess, NULL, len, MEM_COMMIT,
+			PAGE_EXECUTE_READWRITE );
+  ip.pB = code;
 
-  context.Esp -= size;
-  inj.funaddr = (DWORD)GetProcAddress( GetModuleHandle( "kernel32.dll" ),
-							"LoadLibraryA" );
-  inj.dlladdr = context.Esp + offsetof(struct InjectData,dllname);
-  inj.retaddr = context.Eip;
-  WriteProcessMemory( pinfo->hProcess, (void*)context.Esp, &inj, size, NULL );
+#ifdef _WIN64
+  *ip.pL++ = context.Rip;
+  *ip.pL++ = (DWORD64)LoadLibraryA;
+  context.Rip = (DWORD64)mem + 16;
+#else
+  mem32 = (DWORD)(DWORD_PTR)mem;
+  LLA = (DWORD_PTR)GetProcAddress( GetModuleHandle( "kernel32.dll" ),
+						    "LoadLibraryA" );
 
-  context.Eip = context.Esp + offsetof(struct InjectData,code);
-  VirtualProtectEx( pinfo->hProcess, (void*)context.Eip, sizeof(inj.code),
-		    PAGE_EXECUTE_READWRITE, &size );
+  *ip.pB++ = 0x68;			// push  eip
+  *ip.pL++ = context.Eip;
+  *ip.pB++ = 0x9c;			// pushf
+  *ip.pB++ = 0x60;			// pusha
+  *ip.pB++ = 0x68;			// push  L"path\to\edit.dll"
+  *ip.pL++ = mem32 + CODESIZE;
+  *ip.pB++ = 0xe8;			// call  LoadLibraryA
+  *ip.pL++ = LLA - (mem32 + (DWORD)(ip.pB+4 - code));
+  *ip.pB++ = 0x61;			// popa
+  *ip.pB++ = 0x9d;			// popf
+  *ip.pB++ = 0xc3;			// ret
+  context.Eip = mem32;
+#endif
 
+  WriteProcessMemory( pinfo->hProcess, mem, code, len, NULL );
+  FlushInstructionCache( pinfo->hProcess, mem, len );
   SetThreadContext( pinfo->hThread, &context );
   ResumeThread( pinfo->hThread );
 }
