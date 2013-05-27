@@ -17,7 +17,7 @@ FILETYPE	VFT_APP
   {
     BLOCK "040904B0"
     {
-      VALUE "Comments",         "http://cmdkey.adoxa.cjb.net/"
+      VALUE "Comments",         "http://cmdkey.adoxa.vze.com/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
       VALUE "FileVersion",      PVERS

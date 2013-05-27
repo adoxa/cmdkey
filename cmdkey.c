@@ -35,9 +35,12 @@
 
   21 May, 2013:
   - fixed status in 64-bit version.
+
+  27 May, 2013:
+  * use CreateRemoteThread injection method (and LoadLibraryW).
 */
 
-#define PDATE "21 May, 2013"
+#define PDATE "27 May, 2013"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -673,111 +676,27 @@ void GetStatus( DWORD id, PBYTE base )
 // Inject code into the target process to load our DLL.
 void Inject( LPPROCESS_INFORMATION pinfo )
 {
-  char	  dll[MAX_PATH];
-  char*   name;
-  char*   path;
-  CONTEXT context;
-  DWORD   len;
-  LPVOID  mem;
-  union
-  {
-    PBYTE      pB;
-    PDWORD_PTR pL;
-  } ip;
+  WCHAR  dll[MAX_PATH];
+  LPWSTR name, path;
+  DWORD  len;
+  LPVOID mem;
+  LPVOID LLW;
+  HANDLE thread;
 
-#ifdef _WIN64
-  #define CODESIZE 92
-  static BYTE code[CODESIZE+MAX_PATH] = {
-	0,0,0,0,0,0,0,0,	   // original rip
-	0,0,0,0,0,0,0,0,	   // LoadLibraryA
-	0x9C,			   // pushfq
-	0x50,			   // push  rax
-	0x51,			   // push  rcx
-	0x52,			   // push  rdx
-	0x53,			   // push  rbx
-	0x55,			   // push  rbp
-	0x56,			   // push  rsi
-	0x57,			   // push  rdi
-	0x41,0x50,		   // push  r8
-	0x41,0x51,		   // push  r9
-	0x41,0x52,		   // push  r10
-	0x41,0x53,		   // push  r11
-	0x41,0x54,		   // push  r12
-	0x41,0x55,		   // push  r13
-	0x41,0x56,		   // push  r14
-	0x41,0x57,		   // push  r15
-	0x48,0x83,0xEC,0x28,	   // sub   rsp, 40
-	0x48,0x8D,0x0D,41,0,0,0,   // lea   ecx, "path\to\edit.dll"
-	0xFF,0x15,-49,-1,-1,-1,    // call  LoadLibraryA
-	0x48,0x83,0xC4,0x28,	   // add   rsp, 40
-	0x41,0x5F,		   // pop   r15
-	0x41,0x5E,		   // pop   r14
-	0x41,0x5D,		   // pop   r13
-	0x41,0x5C,		   // pop   r12
-	0x41,0x5B,		   // pop   r11
-	0x41,0x5A,		   // pop   r10
-	0x41,0x59,		   // pop   r9
-	0x41,0x58,		   // pop   r8
-	0x5F,			   // pop   rdi
-	0x5E,			   // pop   rsi
-	0x5D,			   // pop   rbp
-	0x5B,			   // pop   rbx
-	0x5A,			   // pop   rdx
-	0x59,			   // pop   rcx
-	0x58,			   // pop   rax
-	0x9D,			   // popfq
-	0xFF,0x25,-91,-1,-1,-1,    // jmp   original Rip
-	0,			   // dword alignment for LLA, fwiw
-  };
-#else
-  DWORD_PTR LLA;
-  DWORD   mem32;
-  #define CODESIZE 20
-  BYTE	  code[CODESIZE+MAX_PATH];
-#endif
-
-  len = GetModuleFileName( NULL, dll, MAX_PATH ) + 1;
+  len = GetModuleFileNameW( NULL, dll, MAX_PATH ) + 1;
   for (name = path = dll; *path; ++path)
     if (*path == '\\')
       name = path + 1;
-  strcpy( name, "edit.dll" );
-  CopyMemory( code + CODESIZE, dll, len );
-  len += CODESIZE;
+  wcscpy( name, L"edit.dll" );
 
-  SuspendThread( pinfo->hThread );
-  context.ContextFlags = CONTEXT_CONTROL;
-  GetThreadContext( pinfo->hThread, &context );
+  LLW = GetProcAddress( GetModuleHandle( "kernel32.dll" ), "LoadLibraryW" );
   mem = VirtualAllocEx( pinfo->hProcess, NULL, len, MEM_COMMIT,
-			PAGE_EXECUTE_READWRITE );
-  ip.pB = code;
-
-#ifdef _WIN64
-  *ip.pL++ = context.Rip;
-  *ip.pL++ = (DWORD64)LoadLibraryA;
-  context.Rip = (DWORD64)mem + 16;
-#else
-  mem32 = (DWORD)(DWORD_PTR)mem;
-  LLA = (DWORD_PTR)GetProcAddress( GetModuleHandle( "kernel32.dll" ),
-						    "LoadLibraryA" );
-
-  *ip.pB++ = 0x68;			// push  eip
-  *ip.pL++ = context.Eip;
-  *ip.pB++ = 0x9c;			// pushf
-  *ip.pB++ = 0x60;			// pusha
-  *ip.pB++ = 0x68;			// push  L"path\to\edit.dll"
-  *ip.pL++ = mem32 + CODESIZE;
-  *ip.pB++ = 0xe8;			// call  LoadLibraryA
-  *ip.pL++ = LLA - (mem32 + (DWORD)(ip.pB+4 - code));
-  *ip.pB++ = 0x61;			// popa
-  *ip.pB++ = 0x9d;			// popf
-  *ip.pB++ = 0xc3;			// ret
-  context.Eip = mem32;
-#endif
-
-  WriteProcessMemory( pinfo->hProcess, mem, code, len, NULL );
-  FlushInstructionCache( pinfo->hProcess, mem, len );
-  SetThreadContext( pinfo->hThread, &context );
-  ResumeThread( pinfo->hThread );
+			PAGE_READWRITE );
+  WriteProcessMemory( pinfo->hProcess, mem, dll, len * sizeof(WCHAR), NULL );
+  thread = CreateRemoteThread( pinfo->hProcess, NULL, 4096, LLW, mem, 0, NULL );
+  WaitForSingleObject( thread, INFINITE );
+  CloseHandle( thread );
+  VirtualFreeEx( pinfo->hProcess, mem, 0, MEM_RELEASE );
 }
 
 
@@ -786,7 +705,7 @@ void help( void )
   puts(
   "CMDkey by Jason Hood <jadoxa@yahoo.com.au>.\n"
   "Version " PVERS " (" PDATE ").  Freeware.\n"
-  "http://cmdkey.adoxa.cjb.net/\n"
+  "http://cmdkey.adoxa.vze.com/\n"
   "\n"
   "Provide enhanced command line editing for CMD.EXE.\n"
   "\n"
