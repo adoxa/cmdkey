@@ -60,6 +60,9 @@
 
   v2.10, 14 & 15 June, 2012:
   * if there's no parent, copy history from primary.
+
+  21 May, 2013:
+  - fix file name completion testing for directory on an empty name.
 */
 
 #include <stdio.h>
@@ -1930,7 +1933,7 @@ void edit_line( void )
 	  --pos;
 	  fnoq = FALSE;
 	}
-	dir = (fnm[end-1] == dirchar);
+	dir = (end != 0 && fnm[end-1] == dirchar);
 	if (dir && option.no_slash)
 	  --end;
 	pos = fname_pos + replace_chars( fname_pos, pos - fname_pos, fnm, end );

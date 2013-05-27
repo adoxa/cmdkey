@@ -32,9 +32,12 @@
   + 64-bit version;
   - search for the local export (improved future-proofing);
   - install/uninstall will replace/remove a string containing "cmdkey".
+
+  21 May, 2013:
+  - fixed status in 64-bit version.
 */
 
-#define PDATE "15 June, 2012"
+#define PDATE "21 May, 2013"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -606,10 +609,10 @@ void GetStatus( DWORD id, PBYTE base )
     PIMAGE_DOS_HEADER	    pDosHeader;
     PIMAGE_NT_HEADERS	    pNTHeader;
     PIMAGE_EXPORT_DIRECTORY pExportDir;
-    PSTR* ExportNameTable;
-    PBYTE ExportBase;
-    DWORD ord;
-    BYTE  buf[512];
+    PDWORD ExportNameTable;
+    PBYTE  ExportBase;
+    DWORD  ord;
+    BYTE   buf[512];
 
     // Locate the "local" export.
 #define MakeVA( cast, base, addValue ) \
@@ -633,7 +636,7 @@ void GetStatus( DWORD id, PBYTE base )
     ReadProcessMemory( parent, pExportDir, buf, sizeof(buf), NULL );
     ExportBase = buf + (base - (PBYTE)pExportDir);
     pExportDir = (PIMAGE_EXPORT_DIRECTORY)buf;
-    ExportNameTable = MakeVA( PSTR*, ExportBase, pExportDir->AddressOfNames );
+    ExportNameTable = MakeVA( PDWORD, ExportBase, pExportDir->AddressOfNames );
     for (ord = pExportDir->NumberOfNames; (int)--ord >= 0;)
     {
       PSTR pszExportName = MakeVA( PSTR, ExportBase, ExportNameTable[ord] );
