@@ -37,13 +37,14 @@
   - fixed status in 64-bit version.
 
   27 May, 2013:
-  * use CreateRemoteThread injection method (and LoadLibraryW).
+  * use CreateRemoteThread injection method (and LoadLibraryW);
+  - prevent 32/64 mismatch.
 */
 
 #define PDATE "27 May, 2013"
 
 #define WIN32_LEAN_AND_MEAN
-#define _WIN32_WINNT 0x0500
+#define _WIN32_WINNT 0x0501
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdio.h>
@@ -70,10 +71,10 @@ void status( void );
 void help( void );
 
 BOOL  find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32, LPPROCESSENTRY32 );
-DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo );
+DWORD GetParentProcessId( void );
 BOOL  IsInstalled( DWORD id, PBYTE* base );
 void  GetStatus( DWORD id, PBYTE base );
-void  Inject( LPPROCESS_INFORMATION pinfo );
+void  Inject( HANDLE hProcess );
 
 
 int    installed	 __attribute__((dllimport));
@@ -87,7 +88,8 @@ Status local		 __attribute__((dllimport));
 
 int main( int argc, char* argv[] )
 {
-  PROCESS_INFORMATION pinfo;
+  DWORD  pid;
+  HANDLE ph;
   PBYTE  base;
   BOOL	 active, update;
   char*  arg;
@@ -120,10 +122,11 @@ int main( int argc, char* argv[] )
     }
   }
 
-  active = IsInstalled( GetParentProcessInfo( &pinfo ), &base );
+  pid = GetParentProcessId();
+  active = IsInstalled( pid, &base );
   if (active && argc == 1)
   {
-    GetStatus( pinfo.dwProcessId, base );
+    GetStatus( pid, base );
     status();
     return 0;
   }
@@ -421,12 +424,14 @@ int main( int argc, char* argv[] )
 
   if (!active)
   {
-    pinfo.hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE, pinfo.dwProcessId );
-    pinfo.hThread = OpenThread( THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
-				THREAD_SET_CONTEXT, FALSE, pinfo.dwThreadId );
-    Inject( &pinfo );
-    CloseHandle( pinfo.hThread );
-    CloseHandle( pinfo.hProcess );
+    ph = OpenProcess( PROCESS_ALL_ACCESS, FALSE, pid );
+    if (ph == NULL)
+    {
+      puts( "CMDkey: could not open parent process." );
+      return 1;
+    }
+    Inject( ph );
+    CloseHandle( ph );
   }
 
   return 0;
@@ -515,15 +520,14 @@ BOOL find_proc_id( HANDLE snap, DWORD id, LPPROCESSENTRY32 pe,
 }
 
 
-// Obtain the process and thread identifiers of the parent process.
-DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo )
+// Obtain the process identifier of the parent process; verify the architecture.
+DWORD GetParentProcessId( void )
 {
-  HANDLE hSnap;
+  HANDLE hSnap, ph;
   PROCESSENTRY32 pe, ppe;
-  THREADENTRY32  te;
-  BOOL	 fOk;
+  BOOL	 parent_wow64, me_wow64;
 
-  hSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS|TH32CS_SNAPTHREAD, 0 );
+  hSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
   if (hSnap == INVALID_HANDLE_VALUE)
   {
     puts( "CMDkey: unable to obtain process snapshot." );
@@ -544,21 +548,24 @@ DWORD GetParentProcessInfo( LPPROCESS_INFORMATION pInfo )
   }
   parent_pid = pe.th32ParentProcessID;
 
-  te.dwSize = sizeof(te);
-  for (fOk = Thread32First( hSnap, &te ); fOk; fOk = Thread32Next( hSnap, &te ))
-    if (te.th32OwnerProcessID == pe.th32ProcessID)
-      break;
-
   CloseHandle( hSnap );
 
-  if (!fOk)
+  ph = OpenProcess( PROCESS_QUERY_INFORMATION, FALSE, pe.th32ProcessID );
+  if (ph == NULL)
   {
-    puts( "CMDkey: could not find my parent's thread ID." );
+    puts( "CMDkey: could not open parent process." );
     exit( 1 );
   }
+  IsWow64Process( ph, &parent_wow64 );
+  IsWow64Process( GetCurrentProcess(), &me_wow64 );
+  CloseHandle( ph );
 
-  pInfo->dwThreadId  = te.th32ThreadID;
-  pInfo->dwProcessId = pe.th32ProcessID;
+  if (parent_wow64 != me_wow64)
+  {
+    printf( "CMDkey: Cannot use %d-bit CMDkey with %d-bit CMD.EXE.\n",
+	    (me_wow64) ? 32 : 64, (parent_wow64) ? 32 : 64 );
+    exit( 1 );
+  }
 
   return pe.th32ProcessID;
 }
@@ -674,7 +681,7 @@ void GetStatus( DWORD id, PBYTE base )
 
 
 // Inject code into the target process to load our DLL.
-void Inject( LPPROCESS_INFORMATION pinfo )
+void Inject( HANDLE hProcess )
 {
   WCHAR  dll[MAX_PATH];
   LPWSTR name, path;
@@ -690,13 +697,12 @@ void Inject( LPPROCESS_INFORMATION pinfo )
   wcscpy( name, L"edit.dll" );
 
   LLW = GetProcAddress( GetModuleHandle( "kernel32.dll" ), "LoadLibraryW" );
-  mem = VirtualAllocEx( pinfo->hProcess, NULL, len, MEM_COMMIT,
-			PAGE_READWRITE );
-  WriteProcessMemory( pinfo->hProcess, mem, dll, len * sizeof(WCHAR), NULL );
-  thread = CreateRemoteThread( pinfo->hProcess, NULL, 4096, LLW, mem, 0, NULL );
+  mem = VirtualAllocEx( hProcess, NULL, len, MEM_COMMIT, PAGE_READWRITE );
+  WriteProcessMemory( hProcess, mem, dll, len * sizeof(WCHAR), NULL );
+  thread = CreateRemoteThread( hProcess, NULL, 4096, LLW, mem, 0, NULL );
   WaitForSingleObject( thread, INFINITE );
   CloseHandle( thread );
-  VirtualFreeEx( pinfo->hProcess, mem, 0, MEM_RELEASE );
+  VirtualFreeEx( hProcess, mem, 0, MEM_RELEASE );
 }
 
 
