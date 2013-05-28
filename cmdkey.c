@@ -41,10 +41,10 @@
   - prevent 32/64 mismatch.
 */
 
-#define PDATE "27 May, 2013"
+#define PDATE "28 May, 2013"
 
 #define WIN32_LEAN_AND_MEAN
-#define _WIN32_WINNT 0x0501
+#define _WIN32_WINNT 0x0500
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdio.h>
@@ -526,6 +526,8 @@ DWORD GetParentProcessId( void )
   HANDLE hSnap, ph;
   PROCESSENTRY32 pe, ppe;
   BOOL	 parent_wow64, me_wow64;
+  typedef BOOL (WINAPI *LPFN_ISWOW64PROCESS)( HANDLE, PBOOL );
+  LPFN_ISWOW64PROCESS fnIsWow64Process;
 
   hSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
   if (hSnap == INVALID_HANDLE_VALUE)
@@ -550,21 +552,26 @@ DWORD GetParentProcessId( void )
 
   CloseHandle( hSnap );
 
-  ph = OpenProcess( PROCESS_QUERY_INFORMATION, FALSE, pe.th32ProcessID );
-  if (ph == NULL)
+  fnIsWow64Process = (LPFN_ISWOW64PROCESS)GetProcAddress(
+			 GetModuleHandle( "kernel32.dll" ), "IsWow64Process" );
+  if (fnIsWow64Process != NULL)
   {
-    puts( "CMDkey: could not open parent process." );
-    exit( 1 );
-  }
-  IsWow64Process( ph, &parent_wow64 );
-  IsWow64Process( GetCurrentProcess(), &me_wow64 );
-  CloseHandle( ph );
+    ph = OpenProcess( PROCESS_QUERY_INFORMATION, FALSE, pe.th32ProcessID );
+    if (ph == NULL)
+    {
+      puts( "CMDkey: could not open parent process." );
+      exit( 1 );
+    }
+    fnIsWow64Process( ph, &parent_wow64 );
+    fnIsWow64Process( GetCurrentProcess(), &me_wow64 );
+    CloseHandle( ph );
 
-  if (parent_wow64 != me_wow64)
-  {
-    printf( "CMDkey: Cannot use %d-bit CMDkey with %d-bit CMD.EXE.\n",
-	    (me_wow64) ? 32 : 64, (parent_wow64) ? 32 : 64 );
-    exit( 1 );
+    if (parent_wow64 != me_wow64)
+    {
+      printf( "CMDkey: Cannot use %d-bit CMDkey with %d-bit CMD.EXE.\n",
+	      (me_wow64) ? 32 : 64, (parent_wow64) ? 32 : 64 );
+      exit( 1 );
+    }
   }
 
   return pe.th32ProcessID;
