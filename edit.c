@@ -63,6 +63,9 @@
 
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
+
+  28 May, 2013:
+  - set locale code page and use wprintf for better output.
 */
 
 #include <stdio.h>
@@ -71,6 +74,7 @@
 #include <tchar.h>
 #include <wctype.h>
 #include <string.h>
+#include <locale.h>
 #include "cmdkey.h"
 #include "version.h"
 
@@ -812,6 +816,7 @@ void  un_escape( PCWSTR );		// remove the escape character
 BOOL  match_ext( PCWSTR, DWORD, PCWSTR, DWORD ); // match extension in list
 DWORD get_env_var( PCWSTR, PCWSTR );	// get environment variable
 void  show_error( PCSTR, DWORD, DWORD ); // show an internal command error
+void  set_codepage( void );		// set output code page (for printf)
 
 
 // -------------------------   Line Manipulation   ---------------------------
@@ -4225,7 +4230,7 @@ void execute_lsta( DWORD pos )
       cnt = end - pos;
       a   = find_assoc( line.txt + pos, cnt );
       if (a)
-	fprintf( lstout, "defa %-3.*S\t%.*S\n", (int)cnt, line.txt + pos,
+	fwprintf( lstout, L"defa %-3.*s\t%.*s\n", (int)cnt, line.txt + pos,
 		 (int)a->line->len, a->line->line );
       pos = skip_blank( end );
     }
@@ -4273,7 +4278,7 @@ void execute_lsth( DWORD pos )
   if (pos >= line.len)
   {
     for (h = history.next; h != &history; h = h->next)
-      fprintf( lstout, "%.*S\n", (int)h->len, h->line );
+      fwprintf( lstout, L"%.*s\n", (int)h->len, h->line );
   }
   else
   {
@@ -4315,7 +4320,7 @@ void execute_lsth( DWORD pos )
 	  h = history.next;
 	do
 	{
-	  fprintf( lstout, "%.*S\n", (int)h->len, h->line );
+	  fwprintf( lstout, L"%.*s\n", (int)h->len, h->line );
 	  h = h->next;
 	} while (--cnt);
       }
@@ -4328,7 +4333,7 @@ void execute_lsth( DWORD pos )
 	{
 	  if (_wcsnicmp( h->line + end, line.txt + pos, line.len - pos ) == 0)
 	  {
-	    fprintf( lstout, "%.*S\n", (int)h->len, h->line );
+	    fwprintf( lstout, L"%.*s\n", (int)h->len, h->line );
 	    break;
 	  }
 	}
@@ -4405,7 +4410,7 @@ void execute_lstk( DWORD pos )
       key = find_key( pos, cnt );
       if (key)
       {
-	fprintf( lstout, "defk %-3.*S\t", (int)cnt, line.txt + pos );
+	fwprintf( lstout, L"defk %-3.*s\t", (int)cnt, line.txt + pos );
 	list_key( key );
       }
       pos = skip_blank( end );
@@ -4516,7 +4521,7 @@ BOOL redirect( DWORD pos )
   }
   if (!lstout)
   {
-    printf( "CMDkey: unable to %s \"%S\".\n", err, line.txt + beg );
+    wprintf( L"CMDkey: unable to %S \"%s\".\n", err, line.txt + beg );
     return FALSE;
   }
 
@@ -4566,7 +4571,7 @@ void list_key( char* key )
 
   if (m->len <= 0)
   {
-    fprintf( lstout, "=%.*S\n", -m->len, m->line );
+    fwprintf( lstout, L"=%.*s\n", -m->len, m->line );
     return;
   }
 
@@ -4575,7 +4580,7 @@ void list_key( char* key )
     if (m->chfn.ch == '"')              // why would you bother?
       fputs( "\"\\\"\"\n", lstout );
     else
-      fprintf( lstout, "\"%C\"\n", m->chfn.ch );
+      fwprintf( lstout, L"\"%c\"\n", m->chfn.ch );
     return;
   }
 
@@ -4845,10 +4850,10 @@ void list_define( PDefine d, char t )
   if (lastm == TRUE || (lastm == FALSE && d->line->next))
     fputc( '\n', lstout );
 
-  fprintf( lstout, "def%c %-3.*S%c", t, (int)d->len, d->name,
-				     (d->line->next) ? '\n' : '\t' );
+  fwprintf( lstout, L"def%C %-3.*s%C", t, (int)d->len, d->name,
+				       (d->line->next) ? '\n' : '\t' );
   for (ll = d->line; ll; ll = ll->next)
-    fprintf( lstout, "%.*S\n", (int)ll->len, ll->line );
+    fwprintf( lstout, L"%.*s\n", (int)ll->len, ll->line );
 
   if (d->line->next)
   {
@@ -5299,7 +5304,16 @@ void show_error( PCSTR err, DWORD pos, DWORD len )
   fputs( "CMDkey: ", stdout );
   if (line_no)
     printf( "%s:%d: ", file_name, line_no );
-  printf( "%s: %.*S.\n", err, (int)len, line.txt + pos );
+  wprintf( L"%S: %.*s.\n", err, (int)len, line.txt + pos );
+}
+
+
+// Set the locale code page, so printf outputs wide strings correctly.
+void set_codepage( void )
+{
+  char cp[16];
+  sprintf( cp, ".%u", GetConsoleOutputCP() );
+  setlocale( LC_CTYPE, cp );
 }
 
 
@@ -5376,6 +5390,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
       else
 	*p_attr = 0;
     }
+
+    set_codepage();
 
     if (*cmdname)
     {
@@ -5745,7 +5761,10 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
 	else
 	  copy_parent_history();
 	if (*cfgname)
+	{
+	  set_codepage();
 	  read_cmdfile( cfgname );
+	}
 	if (primary_id == 0 && !save_history)
 	{
 	  save_history = primary = TRUE;
