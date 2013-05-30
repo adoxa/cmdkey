@@ -64,8 +64,9 @@
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
 
-  28 May, 2013:
-  - set locale code page and use wprintf for better output.
+  28 to 30 May, 2013:
+  - set locale code page and use wprintf for slightly better output;
+  + DBCS (double-width characters) support.
 */
 
 #include <stdio.h>
@@ -237,6 +238,7 @@ HANDLE	hConIn, hConOut;	// handles to keyboard input and screen output
 CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
 Line	prompt = { L"", 0 };    // pointer to the prompt
 WORD	p_attr[MAX_PATH+2];	// buffer to store prompt's attributes
+DWORD	p_attr_len;		// length of above
 BOOL	show_prompt;		// should we redisplay the prompt?
 int	erase_prompt;		// remove the prompt for a multi-cmd?
 DWORD	erase_len;		// how much to remove
@@ -245,6 +247,7 @@ COORD	erase_coord;		// where the prompt starts
 Line	line;			// line being edited
 DWORD	max;			// maximum size of above
 DWORD	dispbeg, dispend;	// beginning and ending position to display
+DWORD	cellend;		// ending character cell position
 Line	selected;		// the selection text
 
 BOOL	kbd;			// is input from the keyboard?
@@ -817,6 +820,10 @@ BOOL  match_ext( PCWSTR, DWORD, PCWSTR, DWORD ); // match extension in list
 DWORD get_env_var( PCWSTR, PCWSTR );	// get environment variable
 void  show_error( PCSTR, DWORD, DWORD ); // show an internal command error
 void  set_codepage( void );		// set output code page (for printf)
+DWORD display_length( PCWSTR, DWORD );	// get the display length for DBCS
+
+UINT  codepage; 			// the output code page
+BOOL  dbcs;				// is it DBCS?
 
 
 // -------------------------   Line Manipulation   ---------------------------
@@ -826,6 +833,9 @@ void  set_codepage( void );		// set output code page (for printf)
 COORD line_to_scr( DWORD pos )
 {
   COORD c;
+
+  if (dbcs)
+    pos = display_length( line.txt, pos );
 
   pos += screen.dwCursorPosition.X;
   c.X  = pos % screen.dwSize.X;
@@ -839,10 +849,19 @@ COORD line_to_scr( DWORD pos )
 // position (ie. end - beg == number of characters).
 void set_display_marks( DWORD beg, DWORD end )
 {
+  DWORD cell;
+
   if (beg < dispbeg)
     dispbeg = beg;
   if (end > dispend)
     dispend = end;
+
+  if (dbcs)
+  {
+    cell = display_length( line.txt, dispend );
+    if (cell > cellend)
+      cellend = cell;
+  }
 }
 
 
@@ -1386,7 +1405,7 @@ void edit_line( void )
     else
       key = get_key( &chfn );
 
-    dispbeg = dispend = 0;		// nothing to display
+    dispbeg = dispend = cellend = 0;	// nothing to display
     compl >>= 1;			// update state of completion
     name  >>= 1;
     empty >>= 1;			// update state of "empty" search
@@ -1661,13 +1680,16 @@ void edit_line( void )
       break;
 
       case Wipe:
-	FillConsoleOutputCharacterW( hConOut, ' ', line.len,
+      {
+	DWORD len = display_length( line.txt, line.len );
+	FillConsoleOutputCharacterW( hConOut, ' ', len,
 				     screen.dwCursorPosition, &read );
 	if (!option.nocolour)
-	  FillConsoleOutputAttribute( hConOut, screen.wAttributes, line.len,
+	  FillConsoleOutputAttribute( hConOut, screen.wAttributes, len,
 				      screen.dwCursorPosition, &read );
 	SetConsoleCursorPosition( hConOut, screen.dwCursorPosition );
 	done = TRUE;
+      }
       break;
 
       case Transpose:
@@ -2017,8 +2039,7 @@ void edit_line( void )
 	  break;
 	if (!option.nocolour)
 	  SetConsoleTextAttribute( hConOut, option.rec_col );
-	dispbeg = pos;
-	dispend = pos + printf( " * Press key for recording * " );
+	set_display_marks( pos, pos+printf( " * Press key for recording * " ) );
 	if (!option.nocolour)
 	  SetConsoleTextAttribute( hConOut, screen.wAttributes );
 	key = get_key( &chfn );
@@ -2248,45 +2269,63 @@ void edit_line( void )
 	{
 	  FillConsoleOutputAttribute( hConOut, (recording) ? option.rec_col
 							   : option.cmd_col,
-				      len, c, &read );
+			(dbcs) ? display_length( line.txt, line.len )
+				 - display_length( line.txt, dispbeg )
+			       : len, c, &read );
 	  if (markpos != ~0)
 	  {
 	    COORD m = line_to_scr( markbeg );
 	    FillConsoleOutputAttribute( hConOut, option.sel_col,
-					markend - markbeg, m, &read );
+				 (dbcs) ? display_length( line.txt, markend )
+					  - display_length( line.txt, markbeg )
+					: markend - markbeg, m, &read );
 	  }
 	}
 	// The Unicode version will not write control characters using a
 	// TrueType font, so remap them to their Unicode code point.
-	for (start = end = 0; end < len; ++end)
+	// However, it seems DBCS will write control characters using either
+	// font, but the raster font will not write the Unicode glyphs.
+	if (dbcs)
+	  WriteConsoleOutputCharacterW( hConOut, line.txt + dispbeg, len, c,
+					&read );
+	else
 	{
-	  if (line.txt[dispbeg+end] < 32)
+	  for (start = end = 0; end < len; ++end)
 	  {
-	    if (end > start)
+	    if (line.txt[dispbeg+end] < 32)
 	    {
-	      WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
-					    end - start, c, &read);
-	      c.X += read;
-	      if (c.X >= screen.dwSize.X)
+	      if (end > start)
 	      {
-		c.Y += c.X / screen.dwSize.X;
-		c.X %= screen.dwSize.X;
+		WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
+					      end - start, c, &read );
+		c.X += display_length( line.txt+dispbeg+start, read );
+		if (c.X >= screen.dwSize.X)
+		{
+		  c.Y += c.X / screen.dwSize.X;
+		  c.X %= screen.dwSize.X;
+		}
+	      }
+	      start = end + 1;
+	      WriteConsoleOutputCharacterW( hConOut,
+					    ControlChar + line.txt[dispbeg+end],
+					    1, c, &read );
+	      if (++c.X == screen.dwSize.X)
+	      {
+		c.X = 0;
+		++c.Y;
 	      }
 	    }
-	    start = end + 1;
-	    WriteConsoleOutputCharacterW( hConOut,
-					  ControlChar + line.txt[dispbeg+end],
-					  1, c, &read );
-	    if (++c.X == screen.dwSize.X)
-	    {
-	      c.X = 0;
-	      ++c.Y;
-	    }
 	  }
+	  WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
+					end - start, c, &read);
+	  cnt -= len;
 	}
-	WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
-				      end - start, c, &read);
-	cnt -= len;
+      }
+      if (dbcs)
+      {
+	cnt = cellend - display_length( line.txt, line.len );
+	if ((int)cnt < 0)
+	  cnt = 0;
       }
       if (cnt)
       {
@@ -2326,12 +2365,12 @@ void display_prompt( void )
     WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
     WriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
     GetConsoleScreenBufferInfo( hConOut, &screen );
-    if (*p_attr)
+    if (p_attr_len != 0)
     {
       COORD c;
       c.X = 0;
-      c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
-      WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len, c, &read );
+      c.Y = screen.dwCursorPosition.Y - p_attr_len / screen.dwSize.X;
+      WriteConsoleOutputAttribute( hConOut, p_attr, p_attr_len, c, &read );
     }
   }
 }
@@ -2663,7 +2702,7 @@ int find_files( int* pos, int dirs )
   OPENFILENAMEW ofn;
   PHistory f, p;
   int	   beg;
-  DWORD    end;
+  DWORD    end, dend;
   BOOL	   wild, exe;
   WCHAR    wch[2];
   int	   prefix;
@@ -2823,8 +2862,9 @@ int find_files( int* pos, int dirs )
       end = wcslen( fd.cFileName );
       if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 	fd.cFileName[end++] = dirchar;
-      if (end > fname_max)
-	fname_max = end;
+      dend = display_length( fd.cFileName, end );
+      if (dend > fname_max)
+	fname_max = dend;
       f = new_history( fd.cFileName, end );
 
       if (!f)
@@ -2891,7 +2931,7 @@ void list_files( void )
       for (f = fname->next; f != fname; f = f->next)
       {
 	WriteConsoleW( hConOut, f->line, f->len, &read, NULL );
-	if (f->len % screen.dwSize.X)
+	if (display_length( f->line, f->len ) % screen.dwSize.X)
 	  WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
       }
     }
@@ -5312,8 +5352,23 @@ void show_error( PCSTR err, DWORD pos, DWORD len )
 void set_codepage( void )
 {
   char cp[16];
-  sprintf( cp, ".%u", GetConsoleOutputCP() );
+  CPINFO cpi;
+
+  sprintf( cp, ".%u", codepage = GetConsoleOutputCP() );
   setlocale( LC_CTYPE, cp );
+
+  GetCPInfo( codepage, &cpi );
+  dbcs = (cpi.LeadByte[0] != 0);
+}
+
+
+// It seems double-byte characters also occupy two character cells, so need to
+// translate the text position to a display position.
+DWORD display_length( PCWSTR txt, DWORD len )
+{
+  return (dbcs)
+	 ? WideCharToMultiByte( codepage, 0, txt, len, NULL, 0, NULL, NULL )
+	 : len;
 }
 
 
@@ -5359,39 +5414,90 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     }
     check_break = 1;
 
+    set_codepage();
+
     if (macro_stk || mcmd.txt)
       remove_prompt();
     else
     {
       if (!option.nocolour && prompt.len > 3 &&
-	  prompt.txt[1] == ':' && prompt.txt[prompt.len-1] == '>')
+	  prompt.txt[1] == ':' && prompt.txt[2] == '\\' &&
+	  prompt.txt[prompt.len-1] == '>')
       {
 	// Assume $P$G and colour it appropriately.
 	WORD dir_col = option.base_col;
 	p_attr[0] = p_attr[1] = option.drv_col;
 	p_attr[2] = (prompt.txt[3] == '>') ? dir_col : option.sep_col;
-	j = prompt.len - 1;
-	p_attr[j] = option.gt_col;
-	while (--j > 2)
+	if (dbcs)
 	{
-	  if (prompt.txt[j] == '\\')
+	  DWORD dbcs_col;
+	  DWORD last_sep = prompt.len;
+	  // For DBCS, need to process forwards to find the double-width
+	  // characters, so find the base directory now.
+	  if (option.base_col != option.dir_col)
 	  {
-	    p_attr[j] = option.sep_col;
+	    while (prompt.txt[--last_sep] != '\\') ;
 	    dir_col = option.dir_col;
 	  }
-	  else
-	    p_attr[j] = dir_col;
+	  j = p_attr_len = dbcs_col = 3;
+	  while (j < prompt.len - 1)
+	  {
+	    if (prompt.txt[j] == '\\')
+	    {
+	      p_attr[p_attr_len++] = option.sep_col;
+	      if (j == last_sep)
+		dir_col = option.base_col;
+	      ++dbcs_col;
+	    }
+	    else
+	    {
+	      p_attr[p_attr_len++] = dir_col;
+	      ++dbcs_col;
+	      if (prompt.txt[j] >= 0x80)
+	      {
+		if (display_length( prompt.txt + j, 1 ) > 1)
+		{
+		  p_attr[p_attr_len++] = dir_col;
+		  // High-level console output adds an extra space to prevent
+		  // splitting a DBCS character.
+		  if (++dbcs_col == screen.dwSize.X + 1)
+		  {
+		    p_attr[p_attr_len++] = dir_col;
+		    dbcs_col = 2;
+		  }
+		}
+	      }
+	    }
+	    if (dbcs_col >= screen.dwSize.X)
+	      dbcs_col = 0;
+	    ++j;
+	  }
+	  p_attr[p_attr_len++] = option.gt_col;
+	}
+	else
+	{
+	  p_attr_len = prompt.len;
+	  j = prompt.len - 1;
+	  p_attr[j] = option.gt_col;
+	  while (--j > 2)
+	  {
+	    if (prompt.txt[j] == '\\')
+	    {
+	      p_attr[j] = option.sep_col;
+	      dir_col = option.dir_col;
+	    }
+	    else
+	      p_attr[j] = dir_col;
+	  }
 	}
 	c.X = 0;
-	c.Y = screen.dwCursorPosition.Y - prompt.len / screen.dwSize.X;
-	WriteConsoleOutputAttribute( hConOut, p_attr, prompt.len, c,
+	c.Y = screen.dwCursorPosition.Y - p_attr_len / screen.dwSize.X;
+	WriteConsoleOutputAttribute( hConOut, p_attr, p_attr_len, c,
 				     lpNumberOfCharsRead );
       }
       else
 	*p_attr = 0;
     }
-
-    set_codepage();
 
     if (*cmdname)
     {
