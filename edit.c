@@ -64,9 +64,10 @@
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
 
-  28 to 30 May, 2013:
+  28 to 31 May, 2013:
   - set locale code page and use wprintf for slightly better output;
-  + DBCS (double-width characters) support.
+  + DBCS (double-width characters) support;
+  + Windows 8 support (use API-MS-Win-Core-Console-* import library).
 */
 
 #include <stdio.h>
@@ -5735,7 +5736,8 @@ BOOL HookAPIOneMod(
     if (pszModName == (PSTR)pDosHeader)
       return TRUE;
 
-    if (stricmp( pszModName, "kernel32.dll" ) == 0)
+    if (stricmp( pszModName, "kernel32.dll" ) == 0 ||
+	_strnicmp( pszModName, "API-MS-Win-Core-Console-", 24 ) == 0)
       break;
   }
 
