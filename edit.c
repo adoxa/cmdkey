@@ -64,10 +64,11 @@
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
 
-  28 to 31 May, 2013:
+  28 May to 1 June, 2013:
   - set locale code page and use wprintf for slightly better output;
   + DBCS (double-width characters) support;
-  + Windows 8 support (use API-MS-Win-Core-Console-* import library).
+  + Windows 8 support (use API-MS-Win-Core-Console-* import library);
+  - 64-bit: fix copying history.
 */
 
 #include <stdio.h>
@@ -2548,7 +2549,7 @@ void copy_parent_history( void )
     ReadProcessMemory( parent, cur, &hist, sizeof(History), NULL );
     if (!make_line( hist.len ))
       break;
-    ReadProcessMemory( parent, cur + 1, line.txt, WSZ(line.len), NULL );
+    ReadProcessMemory( parent, &cur->line, line.txt, WSZ(line.len), NULL );
     add_to_history( FALSE );
   }
   make_line( ~0 );
@@ -5438,7 +5439,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	  if (option.base_col != option.dir_col)
 	  {
 	    while (prompt.txt[--last_sep] != '\\') ;
-	    dir_col = option.dir_col;
+	    if (last_sep != 2)
+	      dir_col = option.dir_col;
 	  }
 	  j = p_attr_len = dbcs_col = 3;
 	  while (j < prompt.len - 1)

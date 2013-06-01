@@ -41,7 +41,7 @@
   - prevent 32/64 mismatch.
 */
 
-#define PDATE "30 May, 2013"
+#define PDATE "1 June, 2013"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
