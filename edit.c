@@ -64,7 +64,7 @@
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
 
-  28 May to 1 June, 2013:
+  28 May to 4 June, 2013:
   - set locale code page and use wprintf for slightly better output;
   + DBCS (double-width characters) support;
   + Windows 8 support (use API-MS-Win-Core-Console-* import library);
@@ -237,6 +237,7 @@ Status	local = {
 };
 
 HANDLE	hConIn, hConOut;	// handles to keyboard input and screen output
+HANDLE	hConWid;		// output handle to determine character width
 CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
 Line	prompt = { L"", 0 };    // pointer to the prompt
 WORD	p_attr[MAX_PATH+2];	// buffer to store prompt's attributes
@@ -5364,13 +5365,31 @@ void set_codepage( void )
 }
 
 
-// It seems double-byte characters also occupy two character cells, so need to
-// translate the text position to a display position.
+// Most double-byte characters also occupy two character cells, so need to
+// translate the text position to a display position.  The only method I came
+// across was to use the multibyte conversion, but that doesn't always work
+// (e.g. in CP936, U+00B4 is one cell, but the conversion is double; perhaps
+// using no best fit may have solved that, though).  The only other thing that
+// seems to work is actually writing the string and seeing where the cursor
+// ends up.  However, that only works in DBCS code pages; in SBCS, there doesn't
+// seem any way to test for double-width chars (short of taking a screen shot
+// and analysing the image, since reading the output does *not* work - you just
+// get the characters, not the cells).
 DWORD display_length( PCWSTR txt, DWORD len )
 {
-  return (dbcs)
-	 ? WideCharToMultiByte( codepage, 0, txt, len, NULL, 0, NULL, NULL )
-	 : len;
+  if (dbcs)
+  {
+    DWORD wr;
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    COORD c = { 0, 0 };
+
+    SetConsoleCursorPosition( hConWid, c );
+    WriteConsoleW( hConWid, txt, len, &wr, NULL );
+    GetConsoleScreenBufferInfo( hConWid, &csbi );
+    return csbi.dwCursorPosition.X;
+  }
+
+  return len;
 }
 
 
@@ -5388,6 +5407,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
   COORD c;
   int	j;
   DWORD mode;
+  SMALL_RECT sr;
+  CONSOLE_CURSOR_INFO cci;
 
   if (option.disable_cmdkey)
   {
@@ -5417,6 +5438,20 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     check_break = 1;
 
     set_codepage();
+    hConWid = CreateConsoleScreenBuffer( GENERIC_READ | GENERIC_WRITE, 0, NULL,
+					 CONSOLE_TEXTMODE_BUFFER, NULL );
+    // Create a single long line to avoid wrapping issues.
+    sr.Left = sr.Top = sr.Bottom = 0;
+    sr.Right = screen.dwSize.X - 1;
+    SetConsoleWindowInfo( hConWid, TRUE, &sr );
+    c.X = 16384;
+    c.Y = 1;
+    SetConsoleScreenBufferSize( hConWid, c );
+    // Even though the cursor is on a different buffer, it still shows up on
+    // the normal one.
+    cci.dwSize = 1;
+    cci.bVisible = FALSE;
+    SetConsoleCursorInfo( hConWid, &cci );
 
     if (macro_stk || mcmd.txt)
       remove_prompt();
@@ -5552,6 +5587,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     line.txt[line.len++] = '\n';
     *lpNumberOfCharsRead = line.len;
 
+    CloseHandle( hConWid );
     prompt.len	= 0;
     trap_break	= FALSE;
     check_break = 0;
