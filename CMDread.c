@@ -1,5 +1,5 @@
 /*
-  cmdkey.c - Enhanced command line editing for CMD.EXE.
+  CMDread.c - Enhanced command line editing for CMD.EXE.
 
   Jason Hood, 24 October to 21 November, 2005 and 20 to 23 December, 2006.
 
@@ -13,7 +13,7 @@
   v2.00, 22 July to 8 August, 2011:
   * compile cleanly with GCC 4;
   * slight improvements in finding parent process;
-  * install as a batch file (cmdkey.cmd) to improve load time for "cmd /c";
+  * install as a batch file (CMDread.cmd) to improve load time for "cmd /c";
   * -e applies to any search, not just blank;
   - fixed updating the config file;
   + option to specify file for a persistent history;
@@ -31,7 +31,8 @@
   * modified injection (use VirtualAllocEx method, not stack);
   + 64-bit version;
   - search for the local export (improved future-proofing);
-  - install/uninstall will replace/remove a string containing "cmdkey".
+  - install/uninstall will replace/remove a string containing "CMDread" or
+    "cmdkey".
 
   21 May, 2013:
   - fixed status in 64-bit version.
@@ -39,9 +40,13 @@
   27 May, 2013:
   * use CreateRemoteThread injection method (and LoadLibraryW);
   - prevent 32/64 mismatch.
+
+  6 June, 2013:
+  * renamed from CMDkey to CMDread to avoid potential confusion/conflict with
+    Microsoft's Cmdkey.
 */
 
-#define PDATE "1 June, 2013"
+#define PDATE "6 June, 2013"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0500
@@ -51,7 +56,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "cmdkey.h"
+#include "CMDread.h"
 #include "version.h"
 
 #ifndef offsetof
@@ -63,8 +68,17 @@ int _CRT_glob = 0;
 #endif
 
 
-#define CMDKEY	"Software\\Microsoft\\Command Processor"
+#define CMDREAD	"Software\\Microsoft\\Command Processor"
 #define AUTORUN "AutoRun"
+
+#ifdef _WIN64
+#define ARCH "amd64"
+#define EDITDLLW L"edit_amd64.dll"
+#else
+#define ARCH "x86"
+#define EDITDLLW L"edit_x86.dll"
+#endif
+#define EDITDLL "edit_" ARCH ".dll"
 
 
 void status( void );
@@ -100,7 +114,7 @@ int main( int argc, char* argv[] )
   unsigned long num;
   HKEY	 key, root;
   DWORD  exist;
-  char	 cmdkey[MAX_PATH+4];
+  char	 CMDread[MAX_PATH+4];
   BOOL	 hstfile;
   UCHAR* colour = NULL;
   int	 j;
@@ -117,7 +131,7 @@ int main( int argc, char* argv[] )
     }
     if (strcmp( argv[1], "--version" ) == 0)
     {
-      puts( "CMDkey version " PVERS " (" PDATE ")." );
+      puts( "CMDread (" ARCH ") version " PVERS " (" PDATE ")." );
       return 0;
     }
   }
@@ -134,6 +148,7 @@ int main( int argc, char* argv[] )
   fname = (active) ? cmdname : cfgname;
   root = HKEY_CURRENT_USER;
   hstfile = FALSE;
+  len = 0;
 
   for (j = 1; j < argc; ++j)
   {
@@ -141,7 +156,7 @@ int main( int argc, char* argv[] )
     {
       if (!argv[j][1])
       {
-	puts( "CMDkey: missing option." );
+	puts( "CMDread: missing option." );
 	return 1;
       }
       for (arg = argv[j] + 1; *arg; arg = end)
@@ -154,7 +169,7 @@ int main( int argc, char* argv[] )
 	  state = (active) ? -1 : 1;
 	if (!*arg)
 	{
-	  puts( "CMDkey: missing option." );
+	  puts( "CMDread: missing option." );
 	  return 1;
 	}
 	opt = NULL;
@@ -172,7 +187,7 @@ int main( int argc, char* argv[] )
 	  case 't': opt = &option.disable_macro; break;
 	  case '_': opt = &option.underscore;    break;
 
-	  case 'z': option.disable_cmdkey = 1;   break;
+	  case 'z': option.disable_CMDread = 1;   break;
 
 	  case 'c':
 	    if (end == arg + 1)
@@ -189,12 +204,12 @@ int main( int argc, char* argv[] )
 	  case ',':
 	    if (end == arg + 1)
 	    {
-	      puts( "CMDkey: missing cursor size." );
+	      puts( "CMDread: missing cursor size." );
 	      return 1;
 	    }
 	    if (num > 100)
 	    {
-	      puts( "CMDkey: cursor size must be between 0 and 100." );
+	      puts( "CMDread: cursor size must be between 0 and 100." );
 	      return 1;
 	    }
 	    option.cursor_size[(*arg == ',')] = (char)num;
@@ -219,7 +234,7 @@ int main( int argc, char* argv[] )
 	    ++end;
 	    if (!isxdigit( *end ))
 	    {
-	      printf( "CMDkey: expecting hexadecimal digit for -k%c.\n",
+	      printf( "CMDread: expecting hexadecimal digit for -k%c.\n",
 		      end[-1] | 0x20 );
 	      return 1;
 	    }
@@ -237,7 +252,7 @@ int main( int argc, char* argv[] )
 	    end = arg + 1;	// on the odd chance of it being a digit
 	    if (!*end)
 	    {
-	      puts( "CMDkey: missing macro ignore character." );
+	      puts( "CMDread: missing macro ignore character." );
 	      return 1;
 	    }
 	    option.ignore_char = *end++;
@@ -246,7 +261,7 @@ int main( int argc, char* argv[] )
 	  case 'l':
 	    if (end == arg + 1 || num == 0 || num > 255)
 	    {
-	      puts( "CMDkey: line length must be between 1 and 255." );
+	      puts( "CMDread: line length must be between 1 and 255." );
 	      return 1;
 	    }
 	    option.min_length = (UCHAR)num;
@@ -255,7 +270,7 @@ int main( int argc, char* argv[] )
 	  case 'h':
 	    if (num > 255)
 	    {
-	      puts( "CMDkey: history size must be between 0 and 255." );
+	      puts( "CMDread: history size must be between 0 and 255." );
 	      return 1;
 	    }
 	    option.histsize = (UCHAR)num;
@@ -264,31 +279,35 @@ int main( int argc, char* argv[] )
 	  case 'i':
 	    if (*arg == 'I')
 	      root = HKEY_LOCAL_MACHINE;
-	    len = GetModuleFileName( NULL, cmdkey + 2, sizeof(cmdkey) - 3 ) + 3;
-	    strlwr( cmdkey + 2 );
-	    cmdkey[0] = '&';
-	    cmdkey[1] = '"';
-	    // Replace exe with cmd (too bad if it's been renamed).
-	    strcpy( cmdkey + len - 4, "cmd\"" );
-	    // Add CMDkey to CMD.EXE's AutoRun setting, if not already present.
-	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
+	    len = GetModuleFileName( NULL, CMDread+2, sizeof(CMDread) - 3 ) + 2;
+	    strlwr( CMDread + 2 );
+	    CMDread[0] = '&';
+	    CMDread[1] = '"';
+	    // Strip the processor type (too bad if it's been renamed).
+	    while (CMDread[--len] != '_' && CMDread[len] != '\\' && len != 0) ;
+	    strcpy( CMDread + len, ".cmd\"" );
+	    len += 5;
+	    // Add CMDread to CMD.EXE's AutoRun setting, if not already present.
+	    RegCreateKeyEx( root, CMDREAD, 0, "", REG_OPTION_NON_VOLATILE,
 			    KEY_ALL_ACCESS, NULL, &key, &exist );
 	    exist = 0;
 	    RegQueryValueEx( key, AUTORUN, NULL, NULL, NULL, &exist );
 	    opt = malloc( exist + len );
 	    if (!opt)
 	    {
-	      puts( "CMDkey: where's all the memory gone?" );
+	      puts( "CMDread: where's all the memory gone?" );
 	      return 1;
 	    }
 	    if (exist > sizeof(TCHAR))
 	    {
 	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
-	      cmdpos = strstr( opt, "cmdkey" );
+	      cmdpos = strstr( opt, "cmdread" );
+	      if (!cmdpos)
+		cmdpos = strstr( opt, "cmdkey" );
 	      if (!cmdpos)
 	      {
-		strcpy( opt + --exist, cmdkey );
-		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist + len );
+		strcpy( opt + --exist, CMDread );
+		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist+len );
 	      }
 	      else
 	      {
@@ -296,13 +315,14 @@ int main( int argc, char* argv[] )
 		while (cmdpos != opt && *--cmdpos != '"') ;
 		while (*end != '\0' && *end++ != '"') ;
 		memmove( cmdpos + len - 1, end, exist - (end - opt) );
-		memcpy( cmdpos, cmdkey + 1, len - 1 );
-		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, strlen( opt ) + 1 );
+		memcpy( cmdpos, CMDread + 1, len - 1 );
+		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt,
+			       strlen( opt ) + 1 );
 	      }
 	    }
 	    else
 	    {
-	      RegSetValueEx( key, AUTORUN, 0, REG_SZ, (LPBYTE)cmdkey + 1, len );
+	      RegSetValueEx( key, AUTORUN, 0, REG_SZ, (LPBYTE)CMDread+1, len );
 	    }
 	    RegCloseKey( key );
 	    free( opt );
@@ -313,8 +333,8 @@ int main( int argc, char* argv[] )
 	  case 'u':
 	    if (*arg == 'U')
 	      root = HKEY_LOCAL_MACHINE;
-	    // Remove CMDkey from CMD.EXE's AutoRun setting.
-	    RegCreateKeyEx( root, CMDKEY, 0, "", REG_OPTION_NON_VOLATILE,
+	    // Remove CMDread from CMD.EXE's AutoRun setting.
+	    RegCreateKeyEx( root, CMDREAD, 0, "", REG_OPTION_NON_VOLATILE,
 			    KEY_ALL_ACCESS, NULL, &key, &exist );
 	    exist = 0;
 	    RegQueryValueEx( key, AUTORUN, NULL, NULL, NULL, &exist );
@@ -323,11 +343,13 @@ int main( int argc, char* argv[] )
 	      opt = malloc( exist );
 	      if (!opt)
 	      {
-		puts( "CMDkey: where's all the memory gone?" );
+		puts( "CMDread: where's all the memory gone?" );
 		return 1;
 	      }
 	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
-	      cmdpos = strstr( opt, "cmdkey" );
+	      cmdpos = strstr( opt, "cmdread" );
+	      if (!cmdpos)
+		cmdpos = strstr( opt, "cmdkey" );
 	      if (cmdpos)
 	      {
 		len = cmdpos - opt + 6;
@@ -343,7 +365,8 @@ int main( int argc, char* argv[] )
 		  else if (cmdpos[len] == '&')
 		    ++len;
 		  memcpy( cmdpos, cmdpos + len, exist - len );
-		  RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist - len );
+		  RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt,
+				 exist - len );
 		}
 	      }
 	      free( opt );
@@ -360,7 +383,7 @@ int main( int argc, char* argv[] )
 	  break;
 
 	  default:
-	    printf( "CMDkey: invalid option: '%c'.\n", *arg );
+	    printf( "CMDread: invalid option: '%c'.\n", *arg );
 	  return 1;
 	}
 	if (opt)
@@ -377,7 +400,7 @@ int main( int argc, char* argv[] )
       FILE* tmp = fopen( argv[j], "r" );
       if (tmp == NULL)
       {
-	printf( "CMDkey: could not open \"%s\".\n", argv[j] );
+	printf( "CMDread: could not open \"%s\".\n", argv[j] );
 	return 1;
       }
       fclose( tmp );
@@ -392,13 +415,14 @@ int main( int argc, char* argv[] )
       GetFullPathName( fname, sizeof(cfgname), cfgname, NULL );
     else if (installed == -1)
     {
-      // Let's just assume it ends with ".exe".
-      j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) ) - 3;
-      strcpy( cfgname + j, "cfg" );
+      j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) );
+      // Strip the processor type (too bad if it's been renamed).
+      while (cfgname[--j] != '_' && cfgname[j] != '\\' && j != 0) ;
+      strcpy( cfgname + j, ".cfg" );
       if (!hstfile)
       {
 	memcpy( hstname, cfgname, j );
-	strcpy( hstname + j, "hst" );
+	strcpy( hstname + j, ".hst" );
 	hstfile = TRUE;
       }
     }
@@ -427,7 +451,7 @@ int main( int argc, char* argv[] )
     ph = OpenProcess( PROCESS_ALL_ACCESS, FALSE, pid );
     if (ph == NULL)
     {
-      puts( "CMDkey: could not open parent process." );
+      puts( "CMDread: could not open parent process." );
       return 1;
     }
     Inject( ph );
@@ -438,7 +462,7 @@ int main( int argc, char* argv[] )
 }
 
 
-// Display the current status of CMDkey.
+// Display the current status of CMDread.
 void status( void )
 {
   char buf[4];
@@ -447,7 +471,7 @@ void status( void )
 
   if (local.version != PVERX)
   {
-    printf( "This CMDkey is version %x.%.2x, but installed edit.dll is ",
+    printf( "This CMDread is version %x.%.2x, but installed edit DLL is ",
 	    PVERX >> 8, PVERX & 0xFF );
     if (local.version == 0)
       puts( "unknown." );
@@ -484,7 +508,7 @@ void status( void )
 	  "* History will remember %s lines.\n"
 	  "* History file: %s.\n"
 	  "* Configuration file: %s.\n"
-	  "* CMDkey is %sabled.\n",
+	  "* CMDread is %sabled.\n",
 	  (option.overwrite) ? "Overwrite" : "Insert",
 	  option.cursor_size[0], option.cursor_size[1],
 	  (option.no_slash) ? "dis" : "en",
@@ -532,20 +556,20 @@ DWORD GetParentProcessId( void )
   hSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
   if (hSnap == INVALID_HANDLE_VALUE)
   {
-    puts( "CMDkey: unable to obtain process snapshot." );
+    puts( "CMDread: unable to obtain process snapshot." );
     exit( 1 );
   }
 
   if (!find_proc_id( hSnap, GetCurrentProcessId(), &pe, &ppe ))
   {
-    puts( "CMDkey: could not find my process ID." );
+    puts( "CMDread: could not find my process ID." );
     exit( 1 );
   }
   if (ppe.th32ProcessID == pe.th32ParentProcessID)
     pe = ppe;
   else if (!find_proc_id( hSnap, pe.th32ParentProcessID, &pe, &ppe ))
   {
-    puts( "CMDkey: could not find my parent's process ID." );
+    puts( "CMDread: could not find my parent's process ID." );
     exit( 1 );
   }
   parent_pid = pe.th32ParentProcessID;
@@ -559,7 +583,7 @@ DWORD GetParentProcessId( void )
     ph = OpenProcess( PROCESS_QUERY_INFORMATION, FALSE, pe.th32ProcessID );
     if (ph == NULL)
     {
-      puts( "CMDkey: could not open parent process." );
+      puts( "CMDread: could not open parent process." );
       exit( 1 );
     }
     fnIsWow64Process( ph, &parent_wow64 );
@@ -568,7 +592,7 @@ DWORD GetParentProcessId( void )
 
     if (parent_wow64 != me_wow64)
     {
-      printf( "CMDkey: Cannot use %d-bit CMDkey with %d-bit CMD.EXE.\n",
+      printf( "CMDread: Cannot use %d-bit CMDread with %d-bit CMD.EXE.\n",
 	      (me_wow64) ? 32 : 64, (parent_wow64) ? 32 : 64 );
       exit( 1 );
     }
@@ -578,7 +602,7 @@ DWORD GetParentProcessId( void )
 }
 
 
-// Determine if CMDkey is already installed in the parent.
+// Determine if CMDread is already installed in the parent.
 BOOL IsInstalled( DWORD id, PBYTE* base )
 {
   HANDLE	hModuleSnap;
@@ -592,7 +616,7 @@ BOOL IsInstalled( DWORD id, PBYTE* base )
 
   if (hModuleSnap == INVALID_HANDLE_VALUE)
   {
-    puts( "CMDkey: unable to obtain module snapshot." );
+    puts( "CMDread: unable to obtain module snapshot." );
     return FALSE;
   }
 
@@ -603,7 +627,7 @@ BOOL IsInstalled( DWORD id, PBYTE* base )
   for (fOk = Module32First( hModuleSnap, &me ); fOk;
        fOk = Module32Next( hModuleSnap, &me ))
   {
-    if (stricmp( me.szModule, "edit.dll" ) == 0)
+    if (stricmp( me.szModule, EDITDLL ) == 0)
     {
       *base = me.modBaseAddr;
       break;
@@ -701,7 +725,7 @@ void Inject( HANDLE hProcess )
   for (name = path = dll; *path; ++path)
     if (*path == '\\')
       name = path + 1;
-  wcscpy( name, L"edit.dll" );
+  wcscpy( name, EDITDLLW );
 
   LLW = GetProcAddress( GetModuleHandle( "kernel32.dll" ), "LoadLibraryW" );
   mem = VirtualAllocEx( hProcess, NULL, len, MEM_COMMIT, PAGE_READWRITE );
@@ -716,13 +740,17 @@ void Inject( HANDLE hProcess )
 void help( void )
 {
   puts(
-  "CMDkey by Jason Hood <jadoxa@yahoo.com.au>.\n"
+  "CMDread by Jason Hood <jadoxa@yahoo.com.au>.\n"
   "Version " PVERS " (" PDATE ").  Freeware.\n"
   "http://cmdkey.adoxa.vze.com/\n"
   "\n"
-  "Provide enhanced command line editing for CMD.EXE.\n"
+#ifdef _WIN64
+  "Provide enhanced command line editing for CMD.EXE (64-bit).\n"
+#else
+  "Provide enhanced command line editing for CMD.EXE (32-bit).\n"
+#endif
   "\n"
-  "cmdkey [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
+  "CMDread [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
   "       [-kcCMD] [-kmSEL] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
   "       [-f[HISTFILE]] [CFGFILE] [-iu]\n"
   "\n"
@@ -738,9 +766,9 @@ void help( void )
   "    -p\t\tuse CHAR to disable translation for the current line\n"
   "    -r\t\tdefault auto-recall mode\n"
   "    -t\t\tdisable translation\n"
-  "    -z\t\tdisable CMDkey\n"
+  "    -z\t\tdisable CMDread\n"
   "    -_\t\tunderscore is not part of a word\n"
-  "    CFGFILE\tfile containing CMDkey commands and/or history lines\n"
+  "    CFGFILE\tfile containing CMDread commands and/or history lines\n"
   "\n"
   "    CMD\t\tcolour of the command line\n"
   "    SEL\t\tcolour of selected text\n"
@@ -756,12 +784,12 @@ void help( void )
   "    -u\t\tuninstall (remove from AutoRun)\n"
   "    -I -U\tuse local machine instead of current user\n"
   "\n"
-  "CMDkey with no arguments will either install itself into the current CMD.EXE or\n"
-  "display the status of the already running instance.\n"
-  "When CMDkey is already running options -begkort_ will toggle the current state;\n"
-  "prefix them with '+' to explicitly turn on (set behaviour indicated above) or\n"
-  "with '-' to turn off (set default behaviour).  Eg: \"cmdkey -+b-g\" will disable\n"
-  "backslash appending and enable the beep, irrespective of the current state.\n"
+  "CMDread with no arguments will either install itself into the current CMD.EXE\n"
+  "or display the status of the already running instance.  When CMDread is already\n"
+  "running, options -begkort_ will toggle the current state; prefix them with '+'\n"
+  "to explicitly turn on (set behaviour indicated above) or with '-' to turn off\n"
+  "(set default behaviour).  Eg: \"CMDread -+b-g\" will disable backslash appending\n"
+  "and enable the beep, irrespective of the current state.\n"
   "A colour is one or two hex digits; see CMD's COLOR help."
       );
 }

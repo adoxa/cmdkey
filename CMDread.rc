@@ -1,11 +1,17 @@
 /*
-  cmdkey.rc - Version resource for cmdkey.exe.
+  CMDread.rc - Version resource for CMDread.exe.
 
   Jason Hood, 23 July, 2010.
 */
 
 #include <winver.h>
 #include "version.h"
+
+#ifdef _WIN64
+#define CMDREADEXE "CMDread_amd64.exe"
+#else
+#define CMDREADEXE "CMDread_x86.exe"
+#endif
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION	PVERB
@@ -21,10 +27,10 @@ FILETYPE	VFT_APP
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
       VALUE "FileVersion",      PVERS
-      VALUE "InternalName",     "CMDkey"
+      VALUE "InternalName",     "CMDread"
       VALUE "LegalCopyright",   "Freeware"
-      VALUE "OriginalFilename", "cmdkey.exe"
-      VALUE "ProductName",      "CMDkey"
+      VALUE "OriginalFilename", CMDREADEXE
+      VALUE "ProductName",      "CMDread"
       VALUE "ProductVersion",   PVERS
     }
   }

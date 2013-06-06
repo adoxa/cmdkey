@@ -7,6 +7,12 @@
 #include <winver.h>
 #include "version.h"
 
+#ifdef _WIN64
+#define EDITDLL "edit_amd64.dll"
+#else
+#define EDITDLL "edit_x86.dll"
+#endif
+
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION	PVERB
 PRODUCTVERSION	PVERB
@@ -17,14 +23,14 @@ FILETYPE	VFT_DLL
   {
     BLOCK "040904B0"
     {
-      VALUE "Comments",         "http://cmdkey.adoxa.cjb.net/"
+      VALUE "Comments",         "http://cmdkey.adoxa.vze.com/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
       VALUE "FileVersion",      PVERS
       VALUE "InternalName",     "edit"
       VALUE "LegalCopyright",   "Freeware"
-      VALUE "OriginalFilename", "edit.dll"
-      VALUE "ProductName",      "CMDkey"
+      VALUE "OriginalFilename", EDITDLL
+      VALUE "ProductName",      "CMDread"
       VALUE "ProductVersion",   PVERS
     }
   }

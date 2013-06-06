@@ -1,5 +1,5 @@
 /*
-  cmdkey.h - Header file for CMDkey.
+  CMDread.h - Header file for CMDread.
 
   Jason Hood, 24 October, 2005.
 */
@@ -16,7 +16,7 @@ typedef struct
   char	silent; 		// don't beep on errors?
   char	auto_recall;		// auto-recall commands
   char	disable_macro;		// disable macro & symbol translation
-  char	disable_cmdkey; 	// disable CMDkey
+  char	disable_CMDread; 	// disable CMDread
   char	no_slash;		// don't append backslash on completed dirs
   char	empty_hist;		// move cursor to end on empty history search
   char	ignore_char;		// prefix character to disable translation

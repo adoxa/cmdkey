@@ -53,7 +53,7 @@
 
   15 November, 2011:
   * go back to calling the normal import (explicitly require ANSICON to be
-    installed after CMDkey).
+    installed after CMDread).
 
   v2.01, 8 December, 2011:
   * copy CMD.EXE's imports into edit.dll (finally work with ANSICON).
@@ -78,7 +78,7 @@
 #include <wctype.h>
 #include <string.h>
 #include <locale.h>
-#include "cmdkey.h"
+#include "CMDread.h"
 #include "version.h"
 
 
@@ -115,7 +115,7 @@ Option SHARED option = {
   0,				// beep on errors
   0,				// don't auto-recall commands
   0,				// enable macro & symbol translation
-  0,				// enable CMDkey
+  0,				// enable CMDread
   0,				// append backslash on completed dirs
   0,				// empty match remains at start
   ' ',				// prefix character to disable translation
@@ -3212,10 +3212,14 @@ BOOL read_cmdfile( PCSTR name )
 	    h = strrchr( name, '\\' );
 	    if (h)
 	    {
-	      c = *++h;
-	      *h = '\0';
+	      // If you keep the trailing backslash, restoring the directory
+	      // will not restore the case. e.g. setting "c:\projects\cmdread\"
+	      // and then setting "C:\Projects\CMDread" will still leave the
+	      // prompt as "c:\projects\cmdread".
+	      if (h != name + 2)
+		*h = '\0';
 	      SetCurrentDirectory( name );
-	      *h = c;
+	      *h = '\\';
 	    }
 	    GetFullPathName( tmp, sizeof(local.hstname), local.hstname, NULL );
 	    SetCurrentDirectoryW( cwd );
@@ -3781,7 +3785,7 @@ BOOL expand_macro( void )
 }
 
 
-// Determine if the first word is meant for CMDkey and execute it if so.
+// Determine if the first word is meant for CMDread and execute it if so.
 BOOL internal_cmd( void )
 {
   DWORD pos, cnt;
@@ -4544,7 +4548,7 @@ BOOL redirect( DWORD pos )
       }
       if (end == 0)
       {
-	puts( "CMDkey: syntax error." );
+	puts( "CMDread: syntax error." );
 	return FALSE;
       }
       line.txt[beg+end] = '\0';
@@ -4564,7 +4568,7 @@ BOOL redirect( DWORD pos )
   }
   if (!lstout)
   {
-    wprintf( L"CMDkey: unable to %S \"%s\".\n", err, line.txt + beg );
+    wprintf( L"CMDread: unable to %S \"%s\".\n", err, line.txt + beg );
     return FALSE;
   }
 
@@ -5344,7 +5348,7 @@ void show_error( PCSTR err, DWORD pos, DWORD len )
     remove_prompt();
     seen_error = TRUE;
   }
-  fputs( "CMDkey: ", stdout );
+  fputs( "CMDread: ", stdout );
   if (line_no)
     printf( "%s:%d: ", file_name, line_no );
   wprintf( L"%S: %.*s.\n", err, (int)len, line.txt + pos );
@@ -5410,10 +5414,10 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
   SMALL_RECT sr;
   CONSOLE_CURSOR_INFO cci;
 
-  if (option.disable_cmdkey)
+  if (option.disable_CMDread)
   {
     local.enabled ^= TRUE;		// only disable this instance
-    option.disable_cmdkey = 0;
+    option.disable_CMDread = 0;
   }
 
   hConIn  = hConsoleInput;
@@ -5885,7 +5889,7 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
 	  if (!ReadOptions( HKEY_LOCAL_MACHINE ))
 	    installed = -1;
       }
-      // Don't bother hooking into CMDkey.
+      // Don't bother hooking into CMDread.
       if (lpReserved)			// static initialisation
 	break;
       installed = TRUE;

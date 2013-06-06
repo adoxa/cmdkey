@@ -1,16 +1,16 @@
 
-				     CMDkey
+				     CMDread
 
-			  Copyright 2006-11 Jason Hood
+			  Copyright 2006-13 Jason Hood
 
-			    Freeware.  Version 2.01
+			    Freeware.  Version 2.10
 
 
     ===========
     Description
     ===========
 
-    CMDkey enhances the normal command line editing of CMD.EXE.  It provides
+    CMDread enhances the normal command line editing of CMD.EXE.  It provides
     more editing functions and improved file name completion, along with
     keyboard shortcuts to most items on the Edit menu.	Symbols and macros
     can run frequently used command lines and its own associations can run
@@ -23,14 +23,13 @@
     ============
 
     Windows 2000 or later.
-    32-bit CMD.EXE.
 
 
     =====
     Usage
     =====
 
-    Running "cmdkey" will install CMDkey into its parent process (typically
+    Running "CMDread" will install CMDread into its parent process (typically
     CMD.EXE, but it may also work with other command processors).  Usually,
     though, you will use "-i" to start it with every instance of CMD.EXE.
 
@@ -38,17 +37,13 @@
     Upgrading
     ---------
 
-    Version 2 uses an improved method of installing (via a batch file in-
-    stead of directly), but I did not automate the upgrade, so run "cmdkey
-    -u" with your current version before running "cmdkey -i" with this
-    version.  Using a batch file allows CMD.EXE to load quicker when CMDkey
-    will not be needed (using "/c" to run a command and exit).
+    Run "CMDread -i" to reflect the new name.
 
     -------
     Options
     -------
 
-    There are numerous options to control CMDkey's behaviour.  Briefly:
+    There are numerous options to control CMDread's behaviour.  Briefly:
 
 	-b	disable backslash appending for completed directories
 	-c	swap insert and overwrite cursors, or set their size
@@ -64,7 +59,7 @@
 	-r	default auto-recall mode
 	-t	disable translation
 	-u	uninstall
-	-z	disable CMDkey
+	-z	disable CMDread
 	-_	treat underscore as punctuation, not part of a word
 
     Options can also start with "/" and may be combined (e.g.: "-c /o",
@@ -72,11 +67,11 @@
     "-" or "+" to explicitly set its behaviour, otherwise it toggles (e.g.:
     "-o" will toggle between insert and overwrite modes, "--o" will set
     insert mode and "-+o" will set overwrite mode).  Except for "-z" all
-    these options apply to every instance of CMDkey.
+    these options apply to every instance of CMDread.
 
     -b - Backslash appending
 
-    When completing a directory CMDkey will normally add a backslash after
+    When completing a directory CMDread will normally add a backslash after
     it (e.g. "dir" --> "directory\").  Use this option to prevent anything
     being added (like CMD.EXE, e.g. "dir" --> "directory").
 
@@ -98,36 +93,38 @@
 
     -f - History file
 
-    The "primary" instance of CMDkey will save its history to this file when
-    CMD.EXE exits and restore it when next run.  The default is "cmdkey.hst"
-    in the same directory as "cmdkey.exe"; if no file is specified, the his-
-    tory will not be saved.  The primary instance is the first one to load,
-    or the next one loaded after the first one exits.  If you've chosen to
-    remember every line, "only" the last 1000 will be saved.
+    The "primary" instance of CMDread will save its history to this file when
+    CMD.EXE exits and restore it when next run.  The default is "CMDread.hst"
+    in the same directory as "CMDread.cmd"; if no file is specified, the his-
+    tory will not be saved (i.e. without "-f" it will save to CMDread.hst, with
+    "-f" it will not save history and with "-fFILE" it will save to FILE).  The
+    primary instance is the first one to load, or the next one loaded after the
+    first one exits.  If you've chosen to remember every line, "only" the last
+    1000 will be saved.
 
     -g - Silent
 
     Certain operations will beep to let you know something has happened
     (e.g. going through all the completed file names).	Use this option to
-    suppress the beep and make CMDkey quiet.
+    suppress the beep and make CMDread quiet.
 
     -h - History size
 
-    This option sets the number of command lines CMDkey will remember in its
+    This option sets the number of command lines CMDread will remember in its
     history.  The default is 50; it may be set to between 0 and 255, inclu-
     sive, with 0 meaning it will remember every line.
 
     -i - Install
 
-    Use this option to make CMDkey permanent.  It will append itself to
+    Use this option to make CMDread permanent.	It will append itself to
     CMD.EXE's AutoRun registry setting, so every time CMD.EXE runs it will
-    also run CMDkey.  This option also has the effect of making the current
+    also run CMDread.  This option also has the effect of making the current
     options the new defaults.  Normally it installs for the current user;
     use -I to install for the local machine.
 
     -k - Colours
 
-    CMDkey can (and, by default, does) spice up the command line with a bit
+    CMDread can (and, by default, does) spice up the command line with a bit
     of colour.	This option can turn off the colours, or set the colours you
     would like to use:
 
@@ -158,14 +155,14 @@
 
     -o - Overwrite
 
-    CMDkey usually functions in insert mode, where current characters are
+    CMDread usually functions in insert mode, where current characters are
     pushed aside to make room for new characters.  This option sets over-
     write mode, where current characters are replaced by new ones.
 
     -p - Ignore character
 
     Starting a line with the character specified by this option will cause
-    CMDkey to ignore its usual translations and leave the line unmodified.
+    CMDread to ignore its usual translations and leave the line unmodified.
     The default character is space.
 
     -r - Auto-recall
@@ -175,16 +172,16 @@
 
     -t - Disable translation
 
-    Prevent CMDkey from applying its usual translations.
+    Prevent CMDread from applying its usual translations.
 
     -u - Uninstall
 
-    Remove the AutoRun entry added by "-i" ("-U" will remove "-I").  CMDkey
+    Remove the AutoRun entry added by "-i" ("-U" will remove "-I").  CMDread
     will still remain active until CMD.EXE itself exits.
 
     -z - Disable
 
-    Disable CMDkey, restoring the original input behaviour.
+    Disable CMDread, restoring the original input behaviour.
 
     -_ - Underscore
 
@@ -192,10 +189,10 @@
     single word).  This option treats underscore as punctuation (the prior
     example becomes two words).
 
-    Finally, a file name can be given to configure CMDkey.  The default name
-    is "cmdkey.cfg" in the same directory as "cmdkey.exe".  The file can
+    Finally, a file name can be given to configure CMDread.  The default name
+    is "CMDread.cfg" in the same directory as "CMDread.cmd".  The file can
     contain anything: lines beginning with a minus ("-") and blank lines are
-    ignored (unless they are part of a macro definition); a CMDkey internal
+    ignored (unless they are part of a macro definition); a CMDread internal
     command will be executed; anything else will be stored in the history.
     The format of the commands in the file is the same as if you typed them
     from the command prompt, except there is no need to escape "^".  Lines
@@ -212,7 +209,7 @@
     Keys
     ----
 
-    CMDkey recognises all the normal control keys, shift and control keys,
+    CMDread recognises all the normal control keys, shift and control keys,
     normal, shift, control, and alt editing and function keys, and normal,
     shift, control, and shift and control backspace, tab, enter and escape.
     Control is represented by "^", shift by "#", shift and control by "#^"
@@ -255,12 +252,12 @@
 	DEFK ^A
 	DEFK ^A Ignore
 
-    will cause CMDkey to ignore Ctrl+A.
+    will cause CMDread to ignore Ctrl+A.
 
 	DEFK ^A =cls
 	DEFK ^A Erase "cls" Enter
 
-    will cause CMDkey to replace the current line with "cls" and enter it.
+    will cause CMDread to replace the current line with "cls" and enter it.
 
     DELK - Delete key(s)
 
@@ -350,7 +347,7 @@
 
     CmdSep - command separator
 
-    CMDkey is capable of specifying several commands on the one line.  This
+    CMDread is capable of specifying several commands on the one line.	This
     key will add the character to separate those commands.  Note that this
     character is a literal character 19, so commands can also be separated
     by quoting ^S or using the keypad.	Note that spaces are significant
@@ -368,7 +365,7 @@
     Searches the history for any line that contains the text you type in (or
     have already entered).  Repeating the search will look for another line,
     not for another instance of the text on the same line.  For example, if
-    you have a line "cmdkey.cmd" and search backwards for "cmd", it will
+    you have a line "CMDread.cmd" and search backwards for "cmd", it will
     place you at the "k" after the first "cmd"; searching again will not
     place you at the end after the second "cmd", but look for another line.
 
@@ -380,11 +377,11 @@
     MacroToggle - macro/symbol/brace toggling
 
     Equivalent to the "-t" command line option and will disable the usual
-    translations CMDkey makes to the line, explained below.
+    translations CMDread makes to the line, explained below.
 
     Quote - the next key will not be interpreted as a function
 
-    Disable CMDkey's function interpretation of the key and treat it as a
+    Disable CMDread's function interpretation of the key and treat it as a
     literal character.
 
     Record - record a series of keys
@@ -431,7 +428,7 @@
     File Name Completion
     --------------------
 
-    CMDkey examines the argument to the left of the cursor and tries to
+    CMDread examines the argument to the left of the cursor and tries to
     complete it as a file name.  The argument may contain a full disk and
     path specification.  If several files match, only the common part of
     their names will be placed on the command line, unless the argument
@@ -439,9 +436,9 @@
     of completion chosen: list or cycle.
 
     In list mode, a list of all possible matching names is displayed.  If
-    there are more names than would fit on the screen CMDkey asks if they
+    there are more names than would fit on the screen CMDread asks if they
     should be displayed; if there are more names than would fit in the con-
-    sole buffer CMDkey does not display them at all.
+    sole buffer CMDread does not display them at all.
 
     In cycle mode, all matches will be displayed in turn.  Once all matches
     have been displayed the original common part will be displayed, then the
@@ -449,7 +446,7 @@
 
     If the name to be completed is the first argument on the line then only
     executables and directories will be selected.  Executables are defined
-    by CMDkey's and Window's associations and one of the "FEXEC" or
+    by CMDread's and Window's associations and one of the "FEXEC" or
     "PATHEXT" environment variables.  If neither of those variables is
     defined the default list is
 
@@ -515,7 +512,7 @@
     -
 
     When used at the start of a line "@" is a special command line modifier
-    which asks CMDkey to "dosify" the line.  CMDkey will replace "/" with
+    which asks CMDread to "dosify" the line.  CMDread will replace "/" with
     "\", leading "-"s with "/" and remove trailing backslashes from the
     line.  For example, if you type:
 
@@ -529,9 +526,9 @@
     ^
     -
 
-    As with CMD.EXE, CMDkey uses the "^" character as an escape character.
+    As with CMD.EXE, CMDread uses the "^" character as an escape character.
     Any character following it will be treated as a literal character, los-
-    ing any special significance CMDkey would give it.	Of particular note
+    ing any special significance CMDread would give it. Of particular note
     is specifying control keys on the command line, which require two "^"
     characters to be recognised (e.g.: "lstk ^^a").
 
@@ -599,11 +596,11 @@
     group of extensions (including the dot) followed by the definition.
 
 	defa .txt.doc view
-	cmdkey.txt
+	CMDread.txt
 
     will become:
 
-	view cmdkey.txt
+	view CMDread.txt
 
     Files without an extension can be associated by a single dot:
 
@@ -615,11 +612,11 @@
     A secondary association can be made by appending "=" to the extension:
 
 	defa .txt=.doc= tde
-	cmdkey.txt=
+	CMDread.txt=
 
     will become:
 
-	tde cmdkey.txt
+	tde CMDread.txt
 
     DELA - Delete association(s)
 
@@ -768,6 +765,16 @@
 
     Legend: + added, - bug-fixed, * changed.
 
+    v2.10, 6 June, 2013:
+    * renamed from CMDkey to CMDread (Microsoft already has a Cmdkey);
+    - fixed file name completion testing for directory on an empty name;
+    - fixed exe/dll version conflicts (improved future-proofing);
+    * improved (un)install;
+    * copy history from primary instance if there's no parent;
+    + 64-bit version;
+    + Windows 8 support;
+    + DBCS double-width character support.
+
     v2.01, 8 December, 2011:
     * fully work with ANSICON.
 
@@ -791,7 +798,7 @@
     * expand multi-line macros using the command separator;
     * add "&" to the delimiter list; use it for internal commands;
     * LSTH uses "^" to find numbers and the redirection symbols;
-    * install as a batch file (cmdkey.cmd) to improve load time for "cmd /c";
+    * install as a batch file (CMDread.cmd) to improve load time for "cmd /c";
     * -e applies to any search, not just blank;
     * improved prompt handling for macros & multiple commands;
     * auto-recall can continue after a single failure; DelLeft will not delete;
@@ -831,5 +838,5 @@
     + first release.
 
 
-    =============================
-    Jason Hood, 15 November, 2011
+    =========================
+    Jason Hood, 6 June, 2013.

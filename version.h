@@ -1,5 +1,5 @@
 /*
-  version.h - Version macros for CMDkey.
+  version.h - Version macros for CMDread.
 
   Jason Hood, 30 July, 2011.
 */
