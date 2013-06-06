@@ -861,7 +861,10 @@ void set_display_marks( DWORD beg, DWORD end )
 
   if (dbcs)
   {
-    cell = display_length( line.txt, dispend );
+    if (end > line.len) // for the recording prompt
+      cell = display_length( line.txt, beg ) + end - beg;
+    else
+      cell = display_length( line.txt, dispend );
     if (cell > cellend)
       cellend = cell;
   }
@@ -5376,9 +5379,8 @@ void set_codepage( void )
 // using no best fit may have solved that, though).  The only other thing that
 // seems to work is actually writing the string and seeing where the cursor
 // ends up.  However, that only works in DBCS code pages; in SBCS, there doesn't
-// seem any way to test for double-width chars (short of taking a screen shot
-// and analysing the image, since reading the output does *not* work - you just
-// get the characters, not the cells).
+// seem any way to test for double-width chars (using the ReadConsoleOutput
+// functions doesn't work - you just get the characters, not the cells).
 DWORD display_length( PCWSTR txt, DWORD len )
 {
   if (dbcs)
