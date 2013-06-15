@@ -10,7 +10,7 @@
 #ifdef _WIN64
 #define EDITDLL "edit_amd64.dll"
 #else
-#define EDITDLL "edit_x86.dll"
+#define EDITDLL "edit.dll"
 #endif
 
 VS_VERSION_INFO VERSIONINFO
@@ -26,12 +26,12 @@ FILETYPE	VFT_DLL
       VALUE "Comments",         "http://cmdkey.adoxa.vze.com/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
-      VALUE "FileVersion",      PVERS
+      VALUE "FileVersion",      PVERSA
       VALUE "InternalName",     "edit"
       VALUE "LegalCopyright",   "Freeware"
       VALUE "OriginalFilename", EDITDLL
       VALUE "ProductName",      "CMDread"
-      VALUE "ProductVersion",   PVERS
+      VALUE "ProductVersion",   PVERSA
     }
   }
 

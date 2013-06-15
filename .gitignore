@@ -1,0 +1,14 @@
+# The various object files.
+*.[oa]
+*.obj
+*.res
+*.lib
+*.exp
+
+# The binaries.
+*.exe
+*.dll
+
+# Configuration.
+*.cfg
+*.hst

@@ -58,28 +58,39 @@
   v2.01, 8 December, 2011:
   * copy CMD.EXE's imports into edit.dll (finally work with ANSICON).
 
-  v2.10, 14 & 15 June, 2012:
+  14 & 15 June, 2012:
   * if there's no parent, copy history from primary.
 
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
 
-  28 May to 4 June, 2013:
-  - set locale code page and use wprintf for slightly better output;
+  v2.10, 28 May to 15 June, 2013:
+  * set locale code page and use wprintf for slightly better output;
   + DBCS (double-width characters) support;
   + Windows 8 support (use API-MS-Win-Core-Console-* import library);
-  - 64-bit: fix copying history.
+  - 64-bit: fix copying history;
+  * use Unicode;
+  - use the code page for the custom history file from the config file;
+  - fixed bug with internal command redirection when redirection wasn't used;
+  * list completed file names using minimal lines;
+  - in testing DBCS double-width wrapping, just realised dispbeg was always 0!
+  - fixed redefining a keyboard macro.
 */
 
-#include <stdio.h>
-#include <windows.h>
-#include <ImageHlp.h>
-#include <tchar.h>
-#include <wctype.h>
-#include <string.h>
-#include <locale.h>
 #include "CMDread.h"
 #include "version.h"
+#include <commdlg.h>
+#include <shellapi.h>
+#include <ImageHlp.h>
+
+#ifndef offsetof
+# define offsetof(type, member) (size_t)(&(((type*)0)->member))
+#endif
+
+#ifndef ENABLE_INSERT_MODE
+#define ENABLE_INSERT_MODE     0x20
+#define ENABLE_QUICK_EDIT_MODE 0x40
+#endif
 
 
 // ========== Auxiliary debug function
@@ -87,29 +98,39 @@
 #define MYDEBUG 0
 
 #if (MYDEBUG > 0)
-void DEBUGSTR( char* szFormat, ... )	// sort of OutputDebugStringf
+void DEBUGSTR( LPCWSTR szFormat, ... ) // sort of OutputDebugStringf
 {
-  char szBuffer[1024];
+  WCHAR szBuffer[1024];
   va_list pArgList;
   va_start( pArgList, szFormat );
-  _vsnprintf( szBuffer, sizeof(szBuffer), szFormat, pArgList );
+  _vsnwprintf( szBuffer, lenof(szBuffer), szFormat, pArgList );
   va_end( pArgList );
   OutputDebugString( szBuffer );
 }
+#elif defined(__GNUC__)
+#define DEBUGSTR( ... )
 #else
-#define DEBUGSTR(...)
+#define DEBUGSTR
 #endif
 
 
 // ========== Global variables and constants
 
+#ifdef __GNUC__
 #define SHARED __attribute__((dllexport, shared, section(".share")))
+#else
+#pragma data_seg(".share", "read,write,shared")
+#pragma data_seg()
+#define SHARED __declspec(dllexport allocate(".share"))
+#endif
 
-int   SHARED installed	= FALSE;
-DWORD SHARED primary_id = 0;
-DWORD SHARED parent_pid = 0;
 
-Option SHARED option = {
+
+SHARED int   installed	= FALSE;
+SHARED DWORD primary_id = 0;
+SHARED DWORD parent_pid = 0;
+
+SHARED Option option = {
   { 25, 50 },			// insert & overwrite cursor sizes
   0,				// default insert mode
   0,				// beep on errors
@@ -118,7 +139,7 @@ Option SHARED option = {
   0,				// enable CMDread
   0,				// append backslash on completed dirs
   0,				// empty match remains at start
-  ' ',				// prefix character to disable translation
+  ' ',                          // old prefix character to disable translation
   1,				// minimum line length to store in history
   50,				// number of commands to store in history
   0,				// enable colouring
@@ -131,11 +152,13 @@ Option SHARED option = {
   26,				// base directory,	bright green  on blue
   121,				// selection,		bright blue   on grey
   1,				// underscore is part of a word
+  ' ',                          // prefix character to disable translation
+  '+',                          // prefix character to update history line
 };
 
-char SHARED cfgname[MAX_PATH] = { 0 }; // default configuration file
-char SHARED cmdname[MAX_PATH] = { 0 }; // runtime configuration file
-char SHARED hstname[MAX_PATH] = { 0 }; // primary history file
+SHARED WCHAR cfgname[MAX_PATH] = { 0 }; // default configuration file
+SHARED WCHAR cmdname[MAX_PATH] = { 0 }; // runtime configuration file
+SHARED WCHAR hstname[MAX_PATH] = { 0 }; // primary history file
 
 
 // Structure to hold a line.
@@ -202,7 +225,15 @@ typedef struct history_s
 {
   struct history_s* prev;
   struct history_s* next;
-  DWORD  len;
+  union
+  {
+    DWORD  len; 		// history line length
+    struct
+    {
+      WORD flen;		// file name length
+      WORD dlen;		// displayed length
+    };
+  };
   WCHAR  line[0];
 } History, *PHistory;
 
@@ -236,8 +267,13 @@ Status	local = {
   { 0 },			// history file
 };
 
+static DWORD conwr;		// dummy variable for API functions
+#define WriteCon( h, t, l )	  WriteConsole( h, t, l, &conwr, NULL )
+#define FillConChar( h, c, l, p ) FillConsoleOutputCharacter( h,c,l,p,&conwr )
+#define FillConAttr( h, a, l, p ) FillConsoleOutputAttribute( h,a,l,p,&conwr )
+
 HANDLE	hConIn, hConOut;	// handles to keyboard input and screen output
-HANDLE	hConWid;		// output handle to determine character width
+HANDLE	hConWid, hConWid1;	// output handles to determine character width
 CONSOLE_SCREEN_BUFFER_INFO screen; // current screen info
 Line	prompt = { L"", 0 };    // pointer to the prompt
 WORD	p_attr[MAX_PATH+2];	// buffer to store prompt's attributes
@@ -263,7 +299,7 @@ BOOL	found_quote;		// true if get_string found a quote
 
 FILE*	file;			// file containing commands
 UINT	filecp; 		// code page of the file
-PCSTR	file_name;		// name of the file for the error display
+PCWSTR	file_name;		// name of the file for the error display
 int	line_no;		// line number of current command
 BOOL	seen_error;		// has an error already been shown?
 
@@ -291,8 +327,6 @@ Line	envvar; 		// buffer for environment variable
 
 #define VAR_ESCAPE	L"%^"                   // escaped variable characters
 #define ARG_ESCAPE	L"%*^"                  // escaped argument characters
-
-#define WSZ( len )	((len) * sizeof(WCHAR)) // byte size of a wide string
 
 
 // Map control characters using the CP437 glyphs as Unicode codepoints.
@@ -399,19 +433,24 @@ enum
 
 
 // Function names for lstk.
-const char const * func_str[] =
+const LPCWSTR func_str[] =
 {
-  "Default", "Ignore", "Quote", "CharLeft", "CharRight", "WordLeft",
-  "WordRight", "EndWordLeft", "EndWordRight", "StringLeft", "StringRight",
-  "BegLine", "EndLine", "Select", "Cut", "Paste", "PrevLine", "NextLine",
-  "SearchBack", "SearchForw", "FindBack", "FindForw", "FirstLine", "LastLine",
-  "CopyFromPrev", "List", "ListDir", "Cycle", "CycleBack", "CycleDir",
-  "CycleDirBack", "SelectFiles", "DelLeft", "DelRight", "DelWordLeft",
-  "DelWordRight", "DelArg", "DelBegLine", "DelEndLine", "DelEndExec", "Erase",
-  "StoreErase", "CmdSep", "Transpose", "SwapWords", "SwapArgs", "AutoRecall",
-  "MacroToggle", "UnderToggle", "VarSubst", "Enter", "Execute", "Wipe",
-  "InsOvr", "Play", "Record", "Undo", "Redo", "Revert", "UpdateEnter",
-  "UpdateErase"
+  L"Default",      L"Ignore",     L"Quote",        L"CharLeft",
+  L"CharRight",    L"WordLeft",   L"WordRight",    L"EndWordLeft",
+  L"EndWordRight", L"StringLeft", L"StringRight",  L"BegLine",
+  L"EndLine",      L"Select",     L"Cut",          L"Paste",
+  L"PrevLine",     L"NextLine",   L"SearchBack",   L"SearchForw",
+  L"FindBack",     L"FindForw",   L"FirstLine",    L"LastLine",
+  L"CopyFromPrev", L"List",       L"ListDir",      L"Cycle",
+  L"CycleBack",    L"CycleDir",   L"CycleDirBack", L"SelectFiles",
+  L"DelLeft",      L"DelRight",   L"DelWordLeft",  L"DelWordRight",
+  L"DelArg",       L"DelBegLine", L"DelEndLine",   L"DelEndExec",
+  L"Erase",        L"StoreErase", L"CmdSep",       L"Transpose",
+  L"SwapWords",    L"SwapArgs",   L"AutoRecall",   L"MacroToggle",
+  L"UnderToggle",  L"VarSubst",   L"Enter",        L"Execute",
+  L"Wipe",         L"InsOvr",     L"Play",         L"Record",
+  L"Undo",         L"Redo",       L"Revert",       L"UpdateEnter",
+  L"UpdateErase"
 };
 
 
@@ -501,15 +540,15 @@ const Cfg cfgkey[] = {
   { L"Up",      VK_UP     },
 };
 
-#define CFGKEYS (sizeof(cfgkey) / sizeof(*cfgkey))
+#define CFGKEYS (lenof(cfgkey))
 
 
 // Key names for lstk.
 
-const char const * key_str[] =
+const LPCWSTR key_str[] =
 {
-  "PgUp", "PgDn", "End", "Home",  "Left", "Up",  "Right",
-  "Down", "Bksp", "Tab", "Enter", "Esc",  "Ins", "Del",
+  L"PgUp", L"PgDn", L"End", L"Home",  L"Left", L"Up",  L"Right",
+  L"Down", L"Bksp", L"Tab", L"Enter", L"Esc",  L"Ins", L"Del",
 };
 
 
@@ -583,7 +622,7 @@ char ctrl_key_table[][2] = {
   { AutoRecall, 	Ignore, 	}, // ^Y
   { Undo,		Redo,		}, // ^Z
   { Erase,		Ignore, 	}, // ^[
-  { CycleDir,		CycleDirBack,	}, // ^\ (dumb GCC)
+  { CycleDir,		CycleDirBack,	}, // ^\  (don't end with a backslash)
   { CmdSep,		Ignore, 	}, // ^]
   { Wipe,		Ignore, 	}, // ^^
   { MacroToggle,	UnderToggle,	}, // ^_
@@ -604,6 +643,7 @@ void   del_macro(  char* );		// delete the macro for key
 
 FILE* lstout;				// list output file
 BOOL  lstpipe;				// outputting to a pipe?
+int   old_mode; 			// current stdout file mode
 BOOL  redirect( DWORD );		// check for redirection
 void  end_redirect( void );		// close the file
 void  list_key( char* );		// show the assignment of a key
@@ -695,7 +735,7 @@ const Cfg internal[] = {
 //#define MIN_CMD_LEN 4
 //#define MAX_CMD_LEN 4
 #define CMD_LEN 4
-#define INTERNAL_CMDS (sizeof(internal) / sizeof(*internal))
+#define INTERNAL_CMDS (lenof(internal))
 
 #define DEFM	 L"DEFM> "              // prompt for defining a macro
 #define DEFM_LEN 6
@@ -739,7 +779,7 @@ PDefine find_assoc( PCWSTR, DWORD );		// find extension in list
 void	del_define( PDefine* ); 		// delete definition from list
 void	delete_define( PDefine*, DWORD );	// delete list of definitions
 void	reset_define( PDefine* );		// wipe all definitions
-void	list_define( PDefine, char );		// display a definition
+void	list_define( PDefine, WCHAR );		// display a definition
 void	list_defines( PDefine*, DWORD );	// display a list of definitions
 PLineList add_line( DWORD );			// add a line to the line list
 void	free_linelist( PLineList );		// free memory used by line list
@@ -747,7 +787,7 @@ void	free_linelist( PLineList );		// free memory used by line list
 
 // Line input
 
-BOOL read_cmdfile( PCSTR );		// read the file
+BOOL read_cmdfile( PCWSTR );		// read the file
 BOOL get_file_line( BOOL );		// read the line from file
 void get_next_line( void );		// get next line of input
 void get_macro_line( BOOL );		// input coming from a macro
@@ -791,10 +831,11 @@ DWORD	 assoc_pos;		// position of the association within the list
 PWCHAR	 flist; 		// open dialog filenames
 #define  FLIST_LEN 2048 	// size of flist
 
-BOOL match_file( PCWSTR, PCWSTR, DWORD, BOOL, BOOL, PHANDLE, PWIN32_FIND_DATAW);
+BOOL match_file( PCWSTR, PCWSTR, DWORD, BOOL, BOOL, PHANDLE, PWIN32_FIND_DATA );
 				// find a file, possibly matching its extension
 int   find_files( int*, int );	// find matching files and common prefix
 void  list_files( void );	// list all files
+int   calc_lines( void );	// determine number of lines for the listing
 BOOL  check_name_count( int );	// determine action to take for many files
 BOOL  quote_needed( PCWSTR, int ); // should filename be quoted?
 PWSTR make_filter( BOOL );	// make the open dialog filter string
@@ -803,7 +844,7 @@ void  make_relative( PWSTR, PWSTR ); // make an absolute path relative
 
 // Utility
 
-#define isword(  ch ) (IsCharAlphaNumericW( ch ) || \
+#define isword(  ch ) (IsCharAlphaNumeric( ch ) || \
 		       (ch == '_' && option.underscore))
 #define isblank( ch ) (ch == ' ' || ch == '\t')
 
@@ -821,9 +862,9 @@ DWORD get_string( DWORD, LPDWORD, BOOL ); // retrieve argument
 void  un_escape( PCWSTR );		// remove the escape character
 BOOL  match_ext( PCWSTR, DWORD, PCWSTR, DWORD ); // match extension in list
 DWORD get_env_var( PCWSTR, PCWSTR );	// get environment variable
-void  show_error( PCSTR, DWORD, DWORD ); // show an internal command error
+void  show_error( PCWSTR, DWORD, DWORD ); // show an internal command error
 void  set_codepage( void );		// set output code page (for printf)
-DWORD display_length( PCWSTR, DWORD );	// get the display length for DBCS
+DWORD display_length( PCWSTR, DWORD, DWORD ); // get the display length for DBCS
 
 UINT  codepage; 			// the output code page
 BOOL  dbcs;				// is it DBCS?
@@ -838,7 +879,7 @@ COORD line_to_scr( DWORD pos )
   COORD c;
 
   if (dbcs)
-    pos = display_length( line.txt, pos );
+    pos = display_length( line.txt, line.len, pos );
 
   pos += screen.dwCursorPosition.X;
   c.X  = pos % screen.dwSize.X;
@@ -862,9 +903,9 @@ void set_display_marks( DWORD beg, DWORD end )
   if (dbcs)
   {
     if (end > line.len) // for the recording prompt
-      cell = display_length( line.txt, beg ) + end - beg;
+      cell = display_length( line.txt, line.len, beg ) + end - beg;
     else
-      cell = display_length( line.txt, dispend );
+      cell = display_length( line.txt, line.len, dispend );
     if (cell > cellend)
       cellend = cell;
   }
@@ -890,7 +931,9 @@ void copy_chars( PCWSTR str, DWORD cnt )
 // Remove cnt characters starting from pos.
 void remove_chars( DWORD pos, DWORD cnt )
 {
-  set_display_marks( pos, line.len );
+  // Set the display mark for DBCS to the previous character, in order to
+  // handle the possible case of a wrapped double-width character.
+  set_display_marks( (dbcs && pos != 0) ? pos - 1 : pos, line.len );
   add_to_undo( UNDOINSERT, pos, cnt );
   memcpy( line.txt + pos, line.txt + pos + cnt, WSZ(line.len - pos - cnt) );
   line.len -= cnt;
@@ -1140,7 +1183,7 @@ char* get_key( PKey chfn )
   {
     do
     {
-      ReadConsoleInputW( hConIn, &rec, 1, &read );
+      ReadConsoleInput( hConIn, &rec, 1, &read );
       if (check_break > 1)
       {
 	// Ignore the ^C that precedes it.
@@ -1154,7 +1197,8 @@ char* get_key( PKey chfn )
   }
   --rec.Event.KeyEvent.wRepeatCount;
 
-  *chfn = (Key){ rec.Event.KeyEvent.uChar.UnicodeChar, Default };
+  chfn->ch = rec.Event.KeyEvent.uChar.UnicodeChar;
+  chfn->fn = Default;
   shift = !!(rec.Event.KeyEvent.dwControlKeyState & SHIFT_PRESSED);
   ctrl	= (rec.Event.KeyEvent.dwControlKeyState &
 	   (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED));
@@ -1212,7 +1256,7 @@ char* get_key( PKey chfn )
       {
 	case '2':                    break;     //       Ctrl+2 = ^@
 	case 219: chfn->ch = 27;     break;	// Shift+Ctrl+[ = #^[
-	case 220: chfn->ch = 28;     break;	// Shift+Ctrl+\ = #^\ÿ
+	case 220: chfn->ch = 28;     break;	// Shift+Ctrl+\ = #^\  //
 	case 221: chfn->ch = 29;     break;	// Shift+Ctrl+] = #^]
 	case '6': chfn->ch = 30;     break;     //       Ctrl+6 = ^^
 	case 189: chfn->ch = 31;     break;	//	 Ctrl+- = ^_
@@ -1238,7 +1282,7 @@ char* get_key( PKey chfn )
 
 // Hook the keyboard to bypass Windows handling of Alt+Enter.
 
-HHOOK hKeyHook;
+HHOOK  hKeyHook;
 HANDLE event;
 
 LRESULT CALLBACK KeyEvent( int nCode, WPARAM wParam, LPARAM lParam )
@@ -1276,7 +1320,6 @@ WCHAR process_keypad( WORD first )
   INPUT_RECORD rec;
   CHAR	 ch;
   WCHAR  wch;
-  DWORD  read;
   int	 num, base;
   HANDLE thread;
   DWORD  id;
@@ -1290,7 +1333,7 @@ WCHAR process_keypad( WORD first )
   {
     thread = CreateThread( NULL, 4096, (LPTHREAD_START_ROUTINE)msgloop,
 			   0, 0, &id );
-    event = CreateEvent( NULL, FALSE, FALSE, "jmhConsoleEvent" );
+    event = CreateEvent( NULL, FALSE, FALSE, L"jmhConsoleEvent" );
     objs[0] = hConIn;
     objs[1] = event;
   }
@@ -1309,10 +1352,10 @@ WCHAR process_keypad( WORD first )
 	VK = VK_SEPARATOR;
       }
       else
-	ReadConsoleInputW( hConIn, &rec, 1, &read );
+	ReadConsoleInput( hConIn, &rec, 1, &conwr );
     }
     else
-      ReadConsoleInputW( hConIn, &rec, 1, &read );
+      ReadConsoleInput( hConIn, &rec, 1, &conwr );
     if (rec.EventType == KEY_EVENT)
     {
       if (rec.Event.KeyEvent.bKeyDown == FALSE)
@@ -1335,7 +1378,7 @@ WCHAR process_keypad( WORD first )
   if (num < 256 && base == 10)
   {
     ch = num;
-    MultiByteToWideChar( GetConsoleOutputCP(), 0, &ch, 1, &wch, 1 );
+    MultiByteToWideChar( codepage, 0, &ch, 1, &wch, 1 );
   }
   else
     wch = num;
@@ -1374,7 +1417,6 @@ void edit_line( void )
   int	 start1, cnt1;
   DWORD  markpos = ~0, markbeg = 0, markend = 0; // the selection positions
   BOOL	 keep_mark;
-  DWORD  read;				// dummy variable for API functions
 
   GetConsoleScreenBufferInfo( hConOut, &screen );
   if (show_prompt)
@@ -1385,7 +1427,7 @@ void edit_line( void )
   GetConsoleMode( hConIn,  &imode );
   GetConsoleMode( hConOut, &omode );
   SetConsoleMode( hConIn,  imode & ~0x1F );	// just keep the extended flags
-  SetConsoleMode( hConOut, ENABLE_PROCESSED_OUTPUT|ENABLE_WRAP_AT_EOL_OUTPUT );
+  SetConsoleMode( hConOut, ENABLE_WRAP_AT_EOL_OUTPUT );
 
   GetConsoleCursorInfo( hConOut, &org_cci );
   cci.bVisible = TRUE;
@@ -1394,7 +1436,8 @@ void edit_line( void )
 
   hist = &history;
   done = FALSE;
-  prev = (Key){ 0, Ignore };
+  prev.ch = 0;
+  prev.fn = Ignore;
   reset_undo();
   while (!done)
   {
@@ -1411,7 +1454,8 @@ void edit_line( void )
     else
       key = get_key( &chfn );
 
-    dispbeg = dispend = cellend = 0;	// nothing to display
+    dispbeg = ~0;			// nothing to display
+    dispend = cellend = 0;
     compl >>= 1;			// update state of completion
     name  >>= 1;
     empty >>= 1;			// update state of "empty" search
@@ -1642,10 +1686,16 @@ void edit_line( void )
       break;
 
       case UpdateErase:
-	if (hist != &history)
+	if ((line.len == 0 || *line.txt != option.update_char) &&
+	    hist != &history)
 	  remove_from_history( hist );
+	goto store_erase;
 
       case StoreErase:
+	if (line.len != 0 && *line.txt == option.update_char &&
+	    hist != &history)
+	  remove_from_history( hist );
+      store_erase:
 	add_to_history( TRUE );
 	hist = &history;
 
@@ -1663,10 +1713,15 @@ void edit_line( void )
 	goto accept_line;
 
       case UpdateEnter:
-	if (hist != &history)
+	if ((line.len == 0 || *line.txt != option.update_char) &&
+	    hist != &history)
 	  remove_from_history( hist );
+	goto accept_line;
 
       case Enter:
+	if (line.len != 0 && *line.txt == option.update_char &&
+	    hist != &history)
+	  remove_from_history( hist );
       accept_line:
 	add_to_history( TRUE );
 	done = TRUE;
@@ -1687,12 +1742,10 @@ void edit_line( void )
 
       case Wipe:
       {
-	DWORD len = display_length( line.txt, line.len );
-	FillConsoleOutputCharacterW( hConOut, ' ', len,
-				     screen.dwCursorPosition, &read );
+	DWORD len = display_length( line.txt, line.len, line.len );
+	FillConChar( hConOut, ' ', len, screen.dwCursorPosition );
 	if (!option.nocolour)
-	  FillConsoleOutputAttribute( hConOut, screen.wAttributes, len,
-				      screen.dwCursorPosition, &read );
+	  FillConAttr( hConOut,screen.wAttributes,len,screen.dwCursorPosition );
 	SetConsoleCursorPosition( hConOut, screen.dwCursorPosition );
 	done = TRUE;
       }
@@ -1906,7 +1959,7 @@ void edit_line( void )
 	    // Check if one of the characters after the prefix needs quoting.
 	    for (fnp = fname->next; fnp != fname; fnp = fnp->next)
 	    {
-	      if (fnp->len > end && quote_needed( fnp->line + end, 1 ))
+	      if (fnp->flen > end && quote_needed( fnp->line + end, 1 ))
 	      {
 		pq = TRUE;
 		break;
@@ -1932,7 +1985,7 @@ void edit_line( void )
 	    }
 	    else
 	      fnp = fname->next;
-	    end = fnp->len;
+	    end = fnp->flen;
 	    start = -1; 		// no prefix when immediately completed
 	  }
 	}
@@ -1950,7 +2003,7 @@ void edit_line( void )
 	  if (fnp == fname)
 	    bell();
 	  fnm = fnp->line;
-	  end = fnp->len;
+	  end = fnp->flen;
 	}
 	quote = (pq || quote_needed( fnm, end ));
 	if (quote && !fnoq)
@@ -1985,12 +2038,14 @@ void edit_line( void )
 	{
 	  PWCHAR p = flist + fname_pos;
 	  WCHAR  path[MAX_PATH];
+	  int	 d, dq, f, q;
 	  if (found_quote)
 	    --path_pos;
 	  remove_chars( path_pos, pos - path_pos );
 	  pos = path_pos;
 	  make_relative( flist, path );
-	  int d = wcslen( path ), dq = quote_needed( path, d ), f, q = dq;
+	  d = wcslen( path );
+	  dq = q = quote_needed( path, d );
 	  while (*p)
 	  {
 	    f = wcslen( p );
@@ -2006,7 +2061,8 @@ void edit_line( void )
       break;
 
       case CmdSep:
-	chfn = (Key){ CMDSEP, Default };
+	chfn.ch = CMDSEP;
+	chfn.fn = Default;
       break;
 
       case AutoRecall:
@@ -2045,7 +2101,8 @@ void edit_line( void )
 	  break;
 	if (!option.nocolour)
 	  SetConsoleTextAttribute( hConOut, option.rec_col );
-	set_display_marks( pos, pos+printf( " * Press key for recording * " ) );
+	set_display_marks( pos,
+			   pos + wprintf( L" * Press key for recording * " ) );
 	if (!option.nocolour)
 	  SetConsoleTextAttribute( hConOut, screen.wAttributes );
 	key = get_key( &chfn );
@@ -2238,62 +2295,63 @@ void edit_line( void )
       }
       set_display_marks( markbeg, markend );
     }
+    if (dispbeg == ~0)
+      dispbeg = line.len;
 
     cnt = dispend - dispbeg;
     if (cnt)
     {
-      COORD c;
+      COORD c, e;
       int len = line.len - dispbeg;
       if (len > 0)
       {
 	// Force a scroll if the line extends beyond the console buffer.
-	c = line_to_scr( dispbeg + len );
-	if (c.Y >= screen.dwSize.Y)
+	e = line_to_scr( dispbeg + len );
+	if (e.Y >= screen.dwSize.Y)
 	{
 	  SMALL_RECT src;
 	  COORD dst;
 	  CHAR_INFO fill;
-	  src.Top = c.Y - screen.dwSize.Y + 1;
+	  src.Top = e.Y - screen.dwSize.Y + 1;
 	  src.Bottom = screen.dwSize.Y - 1;
 	  src.Left = 0;
 	  src.Right = screen.dwSize.X - 1;
 	  dst.X = dst.Y = 0;
-	  fill.Char.AsciiChar = ' ';
+	  fill.Char.UnicodeChar = ' ';
 	  fill.Attributes = screen.wAttributes;
 	  ScrollConsoleScreenBuffer( hConOut, &src, NULL, dst, &fill );
 	  screen.dwCursorPosition.Y -= src.Top;
+	  e.Y = screen.dwSize.Y - 1;
 	}
-	else if (c.Y > screen.srWindow.Bottom)
+	else if (e.Y > screen.srWindow.Bottom)
 	{
-	  screen.srWindow.Top += c.Y - screen.srWindow.Bottom;
-	  screen.srWindow.Bottom += c.Y - screen.srWindow.Bottom;
+	  screen.srWindow.Top	 += e.Y - screen.srWindow.Bottom;
+	  screen.srWindow.Bottom += e.Y - screen.srWindow.Bottom;
 	  SetConsoleWindowInfo( hConOut, TRUE, &screen.srWindow );
 	}
 
 	c = line_to_scr( dispbeg );
-	if (!option.nocolour)
-	{
-	  FillConsoleOutputAttribute( hConOut, (recording) ? option.rec_col
-							   : option.cmd_col,
-			(dbcs) ? display_length( line.txt, line.len )
-				 - display_length( line.txt, dispbeg )
-			       : len, c, &read );
-	  if (markpos != ~0)
-	  {
-	    COORD m = line_to_scr( markbeg );
-	    FillConsoleOutputAttribute( hConOut, option.sel_col,
-				 (dbcs) ? display_length( line.txt, markend )
-					  - display_length( line.txt, markbeg )
-					: markend - markbeg, m, &read );
-	  }
-	}
+	SetConsoleCursorPosition( hConOut, c );
 	// The Unicode version will not write control characters using a
 	// TrueType font, so remap them to their Unicode code point.
 	// However, it seems DBCS will write control characters using either
 	// font, but the raster font will not write the Unicode glyphs.
 	if (dbcs)
-	  WriteConsoleOutputCharacterW( hConOut, line.txt + dispbeg, len, c,
-					&read );
+	{
+	  // If the line wraps, place a space at each edge, on the odd chance
+	  // a double-width character gets shifted.  I would have thought
+	  // console output itself did this, but apparently not.
+	  if (e.Y > c.Y)
+	  {
+	    e.X = screen.dwSize.X - 1;
+	    do
+	    {
+	      --e.Y;
+	      FillConChar( hConOut, ' ', 1, e );
+	    } while (e.Y != c.Y);
+	  }
+	  WriteCon( hConOut, line.txt + dispbeg, len );
+	}
 	else
 	{
 	  for (start = end = 0; end < len; ++end)
@@ -2301,44 +2359,42 @@ void edit_line( void )
 	    if (line.txt[dispbeg+end] < 32)
 	    {
 	      if (end > start)
-	      {
-		WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
-					      end - start, c, &read );
-		c.X += display_length( line.txt+dispbeg+start, read );
-		if (c.X >= screen.dwSize.X)
-		{
-		  c.Y += c.X / screen.dwSize.X;
-		  c.X %= screen.dwSize.X;
-		}
-	      }
+		WriteCon( hConOut, line.txt + dispbeg + start, end - start );
 	      start = end + 1;
-	      WriteConsoleOutputCharacterW( hConOut,
-					    ControlChar + line.txt[dispbeg+end],
-					    1, c, &read );
-	      if (++c.X == screen.dwSize.X)
-	      {
-		c.X = 0;
-		++c.Y;
-	      }
+	      WriteCon( hConOut, ControlChar + line.txt[dispbeg+end], 1 );
 	    }
 	  }
-	  WriteConsoleOutputCharacterW( hConOut, line.txt+dispbeg+start,
-					end - start, c, &read);
+	  WriteCon( hConOut, line.txt + dispbeg + start, end - start );
 	  cnt -= len;
+	}
+	if (!option.nocolour)
+	{
+	  FillConAttr( hConOut, (WORD)((recording) ? option.rec_col
+						   : option.cmd_col),
+		       (dbcs) ? display_length( line.txt, line.len, line.len )
+				- display_length( line.txt, line.len, dispbeg )
+			      : len, c );
+	  if (markpos != ~0)
+	  {
+	    FillConAttr( hConOut, option.sel_col,
+			 (dbcs) ? display_length( line.txt, line.len, markend )
+				  - display_length( line.txt,line.len,markbeg )
+				: markend - markbeg, line_to_scr( markbeg ) );
+	  }
 	}
       }
       if (dbcs)
       {
-	cnt = cellend - display_length( line.txt, line.len );
+	cnt = cellend - display_length( line.txt, line.len, line.len );
 	if ((int)cnt < 0)
 	  cnt = 0;
       }
       if (cnt)
       {
 	c = line_to_scr( line.len );
-	FillConsoleOutputCharacterW( hConOut, ' ', cnt, c, &read );
+	FillConChar( hConOut, ' ', cnt, c );
 	if (!option.nocolour)
-	  FillConsoleOutputAttribute(hConOut, screen.wAttributes, cnt,c, &read);
+	  FillConAttr( hConOut, screen.wAttributes, cnt, c );
       }
     }
 
@@ -2349,34 +2405,36 @@ void edit_line( void )
   SetConsoleCursorInfo( hConOut, &org_cci );
   SetConsoleMode( hConOut, omode );
   // See if the user has changed QuickEdit or Insert modes.
-  GetConsoleMode( hConIn,  &read );
-  if ((read & ENABLE_QUICK_EDIT_MODE) ^ (imode & ENABLE_QUICK_EDIT_MODE))
+  GetConsoleMode( hConIn,  &omode );
+  if ((omode & ENABLE_QUICK_EDIT_MODE) ^ (imode & ENABLE_QUICK_EDIT_MODE))
     imode ^= ENABLE_QUICK_EDIT_MODE;
-  if ((read & ENABLE_INSERT_MODE) ^ (imode & ENABLE_INSERT_MODE))
+  if ((omode & ENABLE_INSERT_MODE) ^ (imode & ENABLE_INSERT_MODE))
     imode ^= ENABLE_INSERT_MODE;
   SetConsoleMode( hConIn,  imode );
 
-  if ((line.len + screen.dwCursorPosition.X) % screen.dwSize.X)
-    WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
+  if ((display_length( line.txt, line.len, line.len )
+       + screen.dwCursorPosition.X) % screen.dwSize.X)
+    WriteCon( hConOut, L"\n", 1 );
+
+  if (line.len != 0 && *line.txt == option.update_char)
+    remove_chars( 0, 1 );
 }
 
 
 // Display the user's prompt.
 void display_prompt( void )
 {
-  DWORD read;
-
   if (kbd)
   {
-    WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
-    WriteConsoleW( hConOut, prompt.txt, prompt.len, &read, NULL );
+    WriteCon( hConOut, L"\n", 1 );
+    WriteCon( hConOut, prompt.txt, prompt.len );
     GetConsoleScreenBufferInfo( hConOut, &screen );
     if (p_attr_len != 0)
     {
       COORD c;
       c.X = 0;
       c.Y = screen.dwCursorPosition.Y - p_attr_len / screen.dwSize.X;
-      WriteConsoleOutputAttribute( hConOut, p_attr, p_attr_len, c, &read );
+      WriteConsoleOutputAttribute( hConOut, p_attr, p_attr_len, c, &conwr );
     }
   }
 }
@@ -2385,14 +2443,11 @@ void display_prompt( void )
 // Remove the user's prompt.
 void remove_prompt( void )
 {
-  DWORD w;
-
   if (erase_prompt == 2)
   {
     // Blank out the prompt.
-    FillConsoleOutputCharacterW( hConOut, ' ', erase_len, erase_coord, &w );
-    FillConsoleOutputAttribute( hConOut, screen.wAttributes,
-				erase_len, erase_coord, &w );
+    FillConChar( hConOut, ' ', erase_len, erase_coord );
+    FillConAttr( hConOut, screen.wAttributes, erase_len, erase_coord );
 
     // Restore the position prior to writing it.
     SetConsoleCursorPosition( hConOut, lastc );
@@ -2568,7 +2623,7 @@ void write_history( void )
 {
   PHistory h;
 
-  FILE* file = fopen( local.hstname, "wb" );
+  FILE* file = _wfopen( local.hstname, L"wb" );
   if (file == NULL)
     return;
 
@@ -2586,7 +2641,7 @@ void write_history( void )
 
 void read_history( void )
 {
-  FILE* file = fopen( local.hstname, "rb" );
+  FILE* file = _wfopen( local.hstname, L"rb" );
   if (file == NULL)
     return;
 
@@ -2614,7 +2669,7 @@ void read_history( void )
 // iated files.  The find handle is returned in fh, with fd containing the file
 // information.  Returns FALSE if no (more) names matched, TRUE otherwise.
 BOOL match_file( PCWSTR name, PCWSTR extlist, DWORD extlen, BOOL dirs, BOOL exe,
-		 PHANDLE fh, PWIN32_FIND_DATAW fd )
+		 PHANDLE fh, PWIN32_FIND_DATA fd )
 {
   static const WCHAR DOT[] = L".";
   PCWSTR dot;
@@ -2622,11 +2677,11 @@ BOOL match_file( PCWSTR name, PCWSTR extlist, DWORD extlen, BOOL dirs, BOOL exe,
 
   if (name)
   {
-    *fh = FindFirstFileW( name, fd );
+    *fh = FindFirstFile( name, fd );
     if (*fh == INVALID_HANDLE_VALUE)
       return FALSE;
   }
-  else if (!FindNextFileW( *fh, fd ))
+  else if (!FindNextFile( *fh, fd ))
   {
     FindClose( *fh );
     return FALSE;
@@ -2669,13 +2724,13 @@ BOOL match_file( PCWSTR name, PCWSTR extlist, DWORD extlen, BOOL dirs, BOOL exe,
       {
 	memcpy( path, line.txt + path_pos, WSZ(fname_pos - path_pos) );
 	wcscpy( path + fname_pos - path_pos, fd->cFileName );
-	if (FindExecutableW( path, NULL, buf ) > (HINSTANCE)32)
+	if (FindExecutable( path, NULL, buf ) > (HINSTANCE)32)
 	  return TRUE;
       }
     }
     else if (!match_ext( dot, name - dot, extlist, extlen ))
       return TRUE;
-  } while (FindNextFileW( *fh, fd ));
+  } while (FindNextFile( *fh, fd ));
 
   FindClose( *fh );
   return FALSE;
@@ -2704,10 +2759,10 @@ UINT_PTR CALLBACK OpenHook( HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam )
 int find_files( int* pos, int dirs )
 {
   HANDLE   fh;
-  WIN32_FIND_DATAW fd;
-  OPENFILENAMEW ofn;
+  WIN32_FIND_DATA fd;
+  OPENFILENAME ofn;
   PHistory f, p;
-  int	   beg;
+  int	   beg, start;
   DWORD    end, dend;
   BOOL	   wild, exe;
   WCHAR    wch[2];
@@ -2734,7 +2789,8 @@ int find_files( int* pos, int dirs )
   // Find the start of the path - either the first non-terminated quote or
   // an appropriate delimiter.
   found_quote = quote = FALSE;
-  for (path_pos = beg = 0; beg < *pos; ++beg)
+  start = (line.len != 0 && *line.txt == option.update_char) ? 1 : 0;
+  for (path_pos = beg = start; beg < *pos; ++beg)
   {
     if (quote)
     {
@@ -2765,7 +2821,7 @@ int find_files( int* pos, int dirs )
 
   // If the path starts at the very beginning of the line, only complete
   // executable files.
-  exe = (path_pos == found_quote);
+  exe = (path_pos == start + found_quote);
 
   // Now find the filename position within the path and check for wildcards.
   wild = FALSE;
@@ -2808,7 +2864,7 @@ int find_files( int* pos, int dirs )
       wcsncpy( fd.cFileName, line.txt + path_pos, fname_pos - path_pos );
       fd.cFileName[fname_pos-path_pos] = '\0';
       // Open dialog doesn't like using other drives.
-      GetFullPathNameW( fd.cFileName, MAX_PATH, dir, NULL );
+      GetFullPathName( fd.cFileName, MAX_PATH, dir, NULL );
       ofn.lpstrInitialDir = dir;
     }
     ofn.lpstrTitle  = (exe) ? L"Select Executable" : L"Select Files";
@@ -2822,7 +2878,7 @@ int find_files( int* pos, int dirs )
     }
     *flist = '\0';
     ofn.nFileExtension = ~0;
-    prefix = GetOpenFileNameW( &ofn );
+    prefix = GetOpenFileName( &ofn );
     fname_pos = ofn.nFileOffset;
     if (ofn.nFileExtension != (WORD)~0)
       flist[fname_pos-1] = '\0';
@@ -2868,13 +2924,13 @@ int find_files( int* pos, int dirs )
       end = wcslen( fd.cFileName );
       if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 	fd.cFileName[end++] = dirchar;
-      dend = display_length( fd.cFileName, end );
+      dend = display_length( fd.cFileName, 0, end );
       if (dend > fname_max)
 	fname_max = dend;
       f = new_history( fd.cFileName, end );
-
       if (!f)
 	return -1;
+      f->dlen = dend;
 
       if (!wild)
       {
@@ -2884,11 +2940,8 @@ int find_files( int* pos, int dirs )
 	else
 	{
 	  for (beg = 0; beg < prefix; ++beg)
-	  {
-	    if ((WCHAR)(DWORD_PTR)CharLowerW( (PWCHAR)(DWORD_PTR)f->line[beg] ) !=
-		(WCHAR)(DWORD_PTR)CharLowerW((PWCHAR)(DWORD_PTR)fname->next->line[beg]))
+	    if (towlower( f->line[beg] ) != towlower( fname->next->line[beg] ))
 	      break;
-	  }
 	  prefix = beg;
 	}
       }
@@ -2897,8 +2950,9 @@ int find_files( int* pos, int dirs )
       // since NTFS maintains a sorted list, anyway.
       for (p = fname->prev; p != fname; p = p->prev)
       {
-	if (CompareStringW( LOCALE_USER_DEFAULT, NORM_IGNORECASE,
-			    f->line, f->len, p->line, p->len ) == 3)
+	if (CompareString( LOCALE_USER_DEFAULT, NORM_IGNORECASE,
+			   f->line, f->flen,
+			   p->line, p->flen ) == CSTR_GREATER_THAN)
 	  break;
       }
       f->prev = p;
@@ -2924,65 +2978,106 @@ int find_files( int* pos, int dirs )
 void list_files( void )
 {
   PHistory f;
-  int	   lines, cols;
-  DWORD    read;
+  int	   lines, row, next_col;
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
 
-  WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
+  SetConsoleMode( hConOut, ENABLE_PROCESSED_OUTPUT|ENABLE_WRAP_AT_EOL_OUTPUT );
+  WriteCon( hConOut, L"\n", 1 );
+
+  lines = calc_lines();
 
   // Are the names too long for column output?
-  if (fname_max + 2 + fname_max > screen.dwSize.X)
+  if (lines == fname_cnt)
   {
     if (check_name_count( fname_cnt ))
     {
       for (f = fname->next; f != fname; f = f->next)
       {
-	WriteConsoleW( hConOut, f->line, f->len, &read, NULL );
-	if (display_length( f->line, f->len ) % screen.dwSize.X)
-	  WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
+	WriteCon( hConOut, f->line, f->flen );
+	if (f->dlen % screen.dwSize.X)
+	  WriteCon( hConOut, L"\n", 1 );
       }
     }
   }
   else
   {
-    cols = screen.dwSize.X / fname_max;
-    if ((cols - 1) * 2 > screen.dwSize.X % fname_max)
-      --cols;
-    lines = fname_cnt / cols;
-    if (fname_cnt % cols)
-      ++lines;
     if (check_name_count( lines ))
     {
       SetConsoleMode( hConOut, ENABLE_PROCESSED_OUTPUT ); // don't wrap at EOL
       GetConsoleScreenBufferInfo( hConOut, &screen );
-      cols = 0;
+      row = next_col = 0;
       for (f = fname->next; f != fname; f = f->next)
       {
 	SetConsoleCursorPosition( hConOut, screen.dwCursorPosition );
-	WriteConsoleW( hConOut, f->line, f->len, &read, NULL );
-	if (++cols == lines)
+	WriteCon( hConOut, f->line, f->flen );
+	GetConsoleScreenBufferInfo( hConOut, &csbi );
+	if (csbi.dwCursorPosition.X > next_col)
+	  next_col = csbi.dwCursorPosition.X;
+	if (++row == lines)
 	{
-	  screen.dwCursorPosition.X += fname_max + 2;
+	  screen.dwCursorPosition.X  = next_col + 2;
 	  screen.dwCursorPosition.Y -= lines - 1;
-	  cols = 0;
+	  row = 0;
 	}
 	else if (++screen.dwCursorPosition.Y == screen.dwSize.Y)
 	{
-	  WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
+	  WriteCon( hConOut, L"\n", 1 );
 	  --screen.dwCursorPosition.Y;
 	}
       }
-      if (cols)
+      if (row)
       {
-	screen.dwCursorPosition.Y += lines - cols - 1;
+	screen.dwCursorPosition.Y += lines - row - 1;
 	SetConsoleCursorPosition( hConOut, screen.dwCursorPosition );
       }
-      WriteConsoleW( hConOut, L"\n", 1, &read, NULL );
+      WriteCon( hConOut, L"\n", 1 );
       SetConsoleMode(hConOut,ENABLE_PROCESSED_OUTPUT|ENABLE_WRAP_AT_EOL_OUTPUT);
     }
   }
 
   display_prompt();
   set_display_marks( 0, line.len );
+
+  SetConsoleMode( hConOut, ENABLE_WRAP_AT_EOL_OUTPUT );
+}
+
+
+// Determine the lines required to fit the names.
+int calc_lines( void )
+{
+  int	   lines, line, cols, col;
+  DWORD    max;
+  PHistory f;
+
+  cols = screen.dwSize.X / fname_max;
+  if ((cols - 1) * 2 > screen.dwSize.X % fname_max)
+    --cols;
+  lines = fname_cnt / cols;
+  if (fname_cnt % cols)
+    ++lines;
+
+  // We now have the maximum number of lines based on the longest name.  Keep
+  // reducing the lines to see how the actual names fit the columns.
+  while (TRUE)
+  {
+    if (--lines == 0)
+      return 1;
+    col = line = max = 0;
+    for (f = fname->next; f != fname; f = f->next)
+    {
+      if (f->dlen > max)
+      {
+	if (col + f->dlen > screen.dwSize.X)
+	  return lines + 1;
+	max = f->dlen;
+      }
+      if (++line == lines)
+      {
+	col += max + 2;
+	line = max = 0;
+      }
+    }
+  }
 }
 
 
@@ -2993,20 +3088,20 @@ BOOL check_name_count( int lines )
 
   if (lines > screen.dwSize.Y - 2)
   {
-    printf( "Too many names to display (%d)!\n", fname_cnt );
+    wprintf( L"Too many names to display (%d)!\n", fname_cnt );
     return FALSE;
   }
 
   if (lines > screen.srWindow.Bottom - screen.srWindow.Top - 1)
   {
-    printf( "Display all %d possibilities? ", fname_cnt );
+    wprintf( L"Display all %d possibilities? ", fname_cnt );
     get_key( &yn );
     if (yn.ch == 'y' || yn.ch == 'Y')
     {
-      puts( "Yes" );
+      _putws( L"Yes" );
       return TRUE;
     }
-    puts( "No" );
+    _putws( L"No" );
     return FALSE;
   }
 
@@ -3042,12 +3137,14 @@ PWSTR make_filter( BOOL exe )
     if (extlen)
     {
       PWSTR e = envvar.txt;
-      int   d = 0;
+      int   d = 0, cnt = lenof(buf), sz;
       f = buf;
       while (*e)
       {
 	while (e[++d] != '.' && e[d] != ';' && e[d] != ':' && e[d] != '\0') ;
-	f += swprintf( f, L"%s%.*s;", line.txt+fname_pos, d, e );
+	sz = _snwprintf( f, cnt, L"%s%.*s;", line.txt+fname_pos, d, e );
+	f += sz;
+	cnt -= sz;
 	if (e[d] == ';' || e[d] == ':')
 	  ++d;
 	e += d;
@@ -3060,11 +3157,11 @@ PWSTR make_filter( BOOL exe )
     wcscpy( buf, line.txt+fname_pos );
 
   len += 1 + wcslen( buf ) + 1 + 13;
-  f = malloc( len * 2 );
+  f = malloc( WSZ(len) );
   if (f)
   {
-    wsprintfW( f, L"%s%c%s%cAll files%c*%c",
-		  line.txt+fname_pos, 0, buf, 0, 0, 0 );
+    _snwprintf( f, len, L"%s%c%s%cAll files%c*%c",
+		line.txt+fname_pos, 0, buf, 0, 0, 0 );
   }
   return f;
 }
@@ -3079,7 +3176,7 @@ void make_relative( PWSTR path, PWSTR rel )
   WCHAR buf[MAX_PATH];
   PWSTR cwd = buf, dir, root;
 
-  GetCurrentDirectoryW( MAX_PATH, cwd );
+  GetCurrentDirectory( MAX_PATH, cwd );
   if (*cwd == *path)
   {
     *rel = '\0';
@@ -3089,7 +3186,7 @@ void make_relative( PWSTR path, PWSTR rel )
     rel[0] = *path;
     rel[1] = ':';
     rel[2] = '\0';
-    GetFullPathNameW( rel, MAX_PATH, cwd, NULL );
+    GetFullPathName( rel, MAX_PATH, cwd, NULL );
     rel += 2;
   }
   cwd  += 2;
@@ -3169,14 +3266,14 @@ void make_relative( PWSTR path, PWSTR rel )
 
 // Read the file.  Internal commands will be processed as usual; anything else
 // will be added to the history.
-BOOL read_cmdfile( PCSTR name )
+BOOL read_cmdfile( PCWSTR name )
 {
   BOOL	rc = FALSE;
   BOOL	skip, cond;
   WCHAR cwd[MAX_PATH];
 
   kbd = FALSE;
-  file = fopen( name, "r" );
+  file = _wfopen( name, L"r" );
   if (file != NULL)
   {
     // Check for the UTF-8 byte-order mark.
@@ -3190,7 +3287,7 @@ BOOL read_cmdfile( PCSTR name )
     file_name = name;
     make_line( 0 );
     skip = cond = FALSE;
-    GetCurrentDirectoryW( MAX_PATH, cwd );
+    GetCurrentDirectory( MAX_PATH, cwd );
     while (get_file_line( skip ))
     {
       if (*line.txt == '#')
@@ -3202,36 +3299,30 @@ BOOL read_cmdfile( PCSTR name )
 	if (!skip)
 	{
 	  int c = getc( file );
+	  // Put it back again, to ensure get_file_line reads what comes after.
+	  ungetc( c, file );
 	  if (c == '=')
 	  {
-	    char  tmp[MAX_PATH];
-	    char* h = tmp;
-	    while ((c = getc( file )) != '\n' && c != EOF)
+	    WCHAR  path[MAX_PATH*2];
+	    LPWSTR tmp;
+	    get_file_line( FALSE );
+	    tmp = line.txt + 1;
+	    // Use the directory of the config file, if necessary.
+	    if (*tmp != '\\' && *tmp != '/' && tmp[1] != ':')
 	    {
-	      if (h < tmp + sizeof(tmp) - 1)
-		*h++ = c;
+	      LPWSTR bs = wcsrchr( name, '\\' );
+	      if (bs != NULL)
+	      {
+		_snwprintf( path, lenof(path), L"%.*s%.*s",
+			    bs - name + 1, name, line.len - 1, tmp );
+		tmp = path;
+	      }
 	    }
-	    *h = '\0';
-	    h = strrchr( name, '\\' );
-	    if (h)
-	    {
-	      // If you keep the trailing backslash, restoring the directory
-	      // will not restore the case. e.g. setting "c:\projects\cmdread\"
-	      // and then setting "C:\Projects\CMDread" will still leave the
-	      // prompt as "c:\projects\cmdread".
-	      if (h != name + 2)
-		*h = '\0';
-	      SetCurrentDirectory( name );
-	      *h = '\\';
-	    }
-	    GetFullPathName( tmp, sizeof(local.hstname), local.hstname, NULL );
-	    SetCurrentDirectoryW( cwd );
+	    GetFullPathName( tmp, lenof(local.hstname), local.hstname, NULL );
 	    save_history = TRUE;
 	    execute_rsth( 0 );
 	    read_history();
 	  }
-	  else
-	    ungetc( c, file );
 	  cond = TRUE;
 	}
 	continue;
@@ -3932,7 +4023,7 @@ void execute_defk( DWORD pos )
   key = find_key( pos, cnt );
   if (key == NULL)
   {
-    show_error( "unrecognised key", pos, cnt );
+    show_error( L"unrecognised key", pos, cnt );
     return;
   }
 
@@ -3975,7 +4066,7 @@ void execute_defk( DWORD pos )
     func = search_cfg( line.txt + pos, cnt, cfg, LastFunc - 1 );
     if (func == -1)
     {
-      show_error( "unrecognised function", pos, cnt );
+      show_error( L"unrecognised function", pos, cnt );
       return;
     }
     if (*key == Play)
@@ -4004,7 +4095,9 @@ void execute_defk( DWORD pos )
 	    for (end = pos - 1; line.txt[end] == '\\'; --end) ;
 	    m->len -= (pos - end) / 2;
 	  }
-	  m->func[m->len++] = (Key){ line.txt[pos++], Default };
+	  m->func[m->len].ch = line.txt[pos++];
+	  m->func[m->len].fn = Default;
+	  ++m->len;
 	}
 	if (pos < line.len) // && line.txt[pos] == '"')
 	{
@@ -4018,11 +4111,13 @@ void execute_defk( DWORD pos )
 	func = search_cfg( line.txt + pos, cnt, cfg, LastFunc - 1 );
 	if (func == -1)
 	{
-	  show_error( "unrecognised function", pos, cnt );
+	  show_error( L"unrecognised function", pos, cnt );
 	  del_macro( key );
 	  return;
 	}
-	m->func[m->len++] = (Key){ 0, func };
+	m->func[m->len].ch = 0;
+	m->func[m->len].fn = func;
+	++m->len;
 	pos += cnt;
       }
       pos = get_string( pos, &cnt, FALSE );
@@ -4048,7 +4143,7 @@ void execute_defm( DWORD pos )
   if (end < line.len && !isblank( line.txt[end] ))
   {
     end = skip_nonblank( end );
-    show_error( "invalid macro name", pos, end - pos );
+    show_error( L"invalid macro name", pos, end - pos );
     goto ret;
   }
   cnt = end - pos;
@@ -4083,7 +4178,7 @@ void execute_defm( DWORD pos )
   {
     if (kbd)
     {
-      WriteConsoleW( hConOut, DEFM, DEFM_LEN, &end, NULL );
+      WriteCon( hConOut, DEFM, DEFM_LEN );
       show_prompt = FALSE;
     }
     get_next_line();
@@ -4120,7 +4215,7 @@ void execute_defs( DWORD pos )
   if (end < line.len && !isblank( line.txt[end] ))
   {
     end = skip_nonblank( end );
-    show_error( "invalid symbol name", pos, end - pos );
+    show_error( L"invalid symbol name", pos, end - pos );
     return;
   }
   cnt = end - pos;
@@ -4401,7 +4496,7 @@ void execute_lstk( DWORD pos )
 {
   int	end, cnt;
   char* key;
-  static const char * const state[5] = { "  ", " #", " ^", " @", "#^" };
+  static const LPCWSTR state[5] = { L"  ", L" #", L" ^", L" @", L"#^" };
 
   if (!redirect( pos ))
     return;
@@ -4415,12 +4510,12 @@ void execute_lstk( DWORD pos )
       {
 	if (end == 0 || ctrl_key_table[cnt][end] != Ignore)
 	{
-	  fprintf( lstout, "defk %s%c\t", state[end*2+2], cnt + '@' );
+	  fwprintf( lstout, L"defk %s%c\t", state[end*2+2], cnt + '@' );
 	  list_key( &ctrl_key_table[cnt][end] );
 	}
       }
     }
-    fputc( '\n', lstout );
+    fputwc( '\n', lstout );
 
     // Editing keys.
     for (cnt = 0; cnt < CFGKEYS; ++cnt)
@@ -4429,14 +4524,14 @@ void execute_lstk( DWORD pos )
       {
 	if (end == 0 || key_table[cnt][end] != Ignore)
 	{
-	  fprintf( lstout, "defk %s%s\t",
-		   (end == 3 && 8 <= cnt && cnt <= 11) ? state[4] : state[end],
-		   key_str[cnt] );
+	  fwprintf( lstout, L"defk %s%s\t",
+		    (end == 3 && 8 <= cnt && cnt <= 11) ? state[4] : state[end],
+		    key_str[cnt] );
 	  list_key( &key_table[cnt][end] );
 	}
       }
     }
-    fputc( '\n', lstout );
+    fputwc( '\n', lstout );
 
     // Function keys.
     for (cnt = 0; cnt < 12; ++cnt)
@@ -4445,7 +4540,7 @@ void execute_lstk( DWORD pos )
       {
 	if (end == 0 || fkey_table[cnt][end] != Ignore)
 	{
-	  fprintf( lstout, "defk %sF%d\t", state[end], cnt + 1 );
+	  fwprintf( lstout, L"defk %sF%d\t", state[end], cnt + 1 );
 	  list_key( &fkey_table[cnt][end] );
 	}
       }
@@ -4460,7 +4555,7 @@ void execute_lstk( DWORD pos )
       key = find_key( pos, cnt );
       if (key)
       {
-	fwprintf( lstout, L"defk %-3.*s\t", (int)cnt, line.txt + pos );
+	fwprintf( lstout, L"defk %-3.*s\t", cnt, line.txt + pos );
 	list_key( key );
       }
       pos = skip_blank( end );
@@ -4524,9 +4619,9 @@ void execute_rsts( DWORD pos )
 // Handle redirection for the list commands.
 BOOL redirect( DWORD pos )
 {
-  DWORD  beg = 0, end;
+  DWORD  beg = 0, end = 0;
   PCWSTR mode;
-  PCSTR  err = NULL;
+  PCWSTR err = NULL;
   DWORD  append;
 
   lstpipe = FALSE;
@@ -4551,7 +4646,7 @@ BOOL redirect( DWORD pos )
       }
       if (end == 0)
       {
-	puts( "CMDread: syntax error." );
+	_putws( L"CMDread: syntax error." );
 	return FALSE;
       }
       line.txt[beg+end] = '\0';
@@ -4559,26 +4654,31 @@ BOOL redirect( DWORD pos )
       {
 	lstpipe = TRUE;
 	lstout	= _wpopen( line.txt + beg, mode );
-	err	= "execute";
+	err	= L"execute";
       }
       else
       {
 	lstout	= _wfopen( line.txt + beg, mode );
-	err	= (append) ? "open" : "create";
+	err	= (append) ? L"open" : L"create";
       }
       break;
     }
   }
   if (!lstout)
   {
-    wprintf( L"CMDread: unable to %S \"%s\".\n", err, line.txt + beg );
+    wprintf( L"CMDread: unable to %s \"%s\".\n", err, line.txt + beg );
     return FALSE;
   }
+  if (lstout == stdout && _isatty( 1 ))
+    old_mode = _setmode( 1, _O_U16TEXT );
 
-  end = skip_blank( beg + end + 1 );
-  if (end > line.len)
-    end = line.len;
-  remove_chars( pos, end - pos );
+  if (end != 0)
+  {
+    end = skip_blank( beg + end + 1 );
+    if (end > line.len)
+      end = line.len;
+    remove_chars( pos, end - pos );
+  }
 
   if (append)
     lastm = TRUE;
@@ -4593,9 +4693,11 @@ BOOL redirect( DWORD pos )
 void end_redirect( void )
 {
   if (lstpipe)
-    pclose( lstout );
+    _pclose( lstout );
   else if (lstout != stdout)
     fclose( lstout );
+  else if (_isatty( 1 ))
+    _setmode( 1, old_mode );
 }
 
 
@@ -4608,14 +4710,14 @@ void list_key( char* key )
 
   if (*key != Play)
   {
-    fprintf( lstout, "%s\n", func_str[(int)*key] );
+    fwprintf( lstout, L"%s\n", func_str[(int)*key] );
     return;
   }
 
   m = find_macro( key );
   if (!m)
   {
-    fprintf( lstout, "%s\n", func_str[Ignore] );
+    fwprintf( lstout, L"%s\n", func_str[Ignore] );
     return;
   }
 
@@ -4628,7 +4730,7 @@ void list_key( char* key )
   if (m->len == 1)
   {
     if (m->chfn.ch == '"')              // why would you bother?
-      fputs( "\"\\\"\"\n", lstout );
+      fwprintf( lstout, L"\"\\\"\"\n" );
     else
       fwprintf( lstout, L"\"%c\"\n", m->chfn.ch );
     return;
@@ -4641,23 +4743,23 @@ void list_key( char* key )
     {
       if (quote)
       {
-	fputs( "\" ", lstout );
+	fwprintf( lstout, L"\" " );
 	quote = FALSE;
       }
-      fprintf( lstout, "%s ", func_str[(int)m->func[pos].fn] );
+      fwprintf( lstout, L"%s ", func_str[(int)m->func[pos].fn] );
     }
     else
     {
       if (!quote)
       {
-	fputc( '"', lstout );
+	fputwc( '"', lstout );
 	quote = TRUE;
       }
       if (m->func[pos].ch == '"')
       {
 	for (bs = pos; --bs >= 0 && m->func[bs].ch == '\\';)
-	  fputc( '\\', lstout );
-	fputc( '\\', lstout );
+	  fputwc( '\\', lstout );
+	fputwc( '\\', lstout );
       }
       fputwc( m->func[pos].ch, lstout );
     }
@@ -4665,10 +4767,10 @@ void list_key( char* key )
   if (quote)
   {
     while (--pos >= 0 && m->func[pos].ch == '\\')
-      fputc( '\\', lstout );
-    fputc( '"', lstout );
+      fputwc( '\\', lstout );
+    fputwc( '"', lstout );
   }
-  fputc( '\n', lstout );
+  fputwc( '\n', lstout );
 }
 
 
@@ -4716,7 +4818,7 @@ PMacro add_macro( char* key )
       macro_head = m;
     }
   }
-  else if (line.len < -1 || line.len > 1)
+  else if (m->len < -1 || m->len > 1)
     free( m->line );
 
   m->len  = 0;
@@ -4891,23 +4993,23 @@ void reset_define( PDefine* head )
 
 
 // List a definition.
-void list_define( PDefine d, char t )
+void list_define( PDefine d, WCHAR t )
 {
   PLineList ll;
 
   // If the last definition was a multi-line macro, or the next one is,
   // add a blank line.
   if (lastm == TRUE || (lastm == FALSE && d->line->next))
-    fputc( '\n', lstout );
+    fputwc( '\n', lstout );
 
-  fwprintf( lstout, L"def%C %-3.*s%C", t, (int)d->len, d->name,
+  fwprintf( lstout, L"def%c %-3.*s%c", t, (int)d->len, d->name,
 				       (d->line->next) ? '\n' : '\t' );
   for (ll = d->line; ll; ll = ll->next)
     fwprintf( lstout, L"%.*s\n", (int)ll->len, ll->line );
 
   if (d->line->next)
   {
-    fprintf( lstout, "%S\n", ENDM );
+    fwprintf( lstout, L"%s\n", ENDM );
     lastm = TRUE;
   }
   else
@@ -4920,7 +5022,7 @@ void list_defines( PDefine* head, DWORD pos )
 {
   PDefine d;
   DWORD   end, cnt;
-  char	  t;
+  WCHAR   t;
 
   if (!redirect( pos ))
     return;
@@ -5314,7 +5416,7 @@ DWORD get_env_var( PCWSTR var, PCWSTR def )
   PWSTR v;
   BOOL	exist;
 
-  varlen = GetEnvironmentVariableW( var, envvar.txt, envvar.len );
+  varlen = GetEnvironmentVariable( var, envvar.txt, envvar.len );
   if (varlen == 0 && def && *def)
   {
     exist  = FALSE;
@@ -5333,7 +5435,7 @@ DWORD get_env_var( PCWSTR var, PCWSTR def )
     envvar.txt = v;
     envvar.len = varlen;
     if (exist)
-      varlen = GetEnvironmentVariableW( var, envvar.txt, envvar.len );
+      varlen = GetEnvironmentVariable( var, envvar.txt, envvar.len );
     else
       memcpy( envvar.txt, def, WSZ(varlen) );
   }
@@ -5344,17 +5446,17 @@ DWORD get_env_var( PCWSTR var, PCWSTR def )
 
 // Show an internal command error.  If reading a file, remove the prompt and
 // show the line number.
-void show_error( PCSTR err, DWORD pos, DWORD len )
+void show_error( PCWSTR err, DWORD pos, DWORD len )
 {
   if (line_no && !seen_error)
   {
     remove_prompt();
     seen_error = TRUE;
   }
-  fputs( "CMDread: ", stdout );
+  fputws( L"CMDread: ", stdout );
   if (line_no)
-    printf( "%s:%d: ", file_name, line_no );
-  wprintf( L"%S: %.*s.\n", err, (int)len, line.txt + pos );
+    wprintf( L"%s:%d: ", file_name, line_no );
+  wprintf( L"%s: %.*s.\n", err, (int)len, line.txt + pos );
 }
 
 
@@ -5381,21 +5483,38 @@ void set_codepage( void )
 // ends up.  However, that only works in DBCS code pages; in SBCS, there doesn't
 // seem any way to test for double-width chars (using the ReadConsoleOutput
 // functions doesn't work - you just get the characters, not the cells).
-DWORD display_length( PCWSTR txt, DWORD len )
+DWORD display_length( PCWSTR txt, DWORD len, DWORD pos )
 {
   if (dbcs)
   {
-    DWORD wr;
+    HANDLE hCon;
     CONSOLE_SCREEN_BUFFER_INFO csbi;
-    COORD c = { 0, 0 };
+    COORD c;
 
-    SetConsoleCursorPosition( hConWid, c );
-    WriteConsoleW( hConWid, txt, len, &wr, NULL );
-    GetConsoleScreenBufferInfo( hConWid, &csbi );
-    return csbi.dwCursorPosition.X;
+    c.Y = 0;
+    c.X = (len == 0) ? 0 : screen.dwCursorPosition.X;
+    hCon = (len == 0) ? hConWid1 : hConWid;
+    SetConsoleCursorPosition( hCon, c );
+    WriteCon( hCon, txt, pos );
+    GetConsoleScreenBufferInfo( hCon, &csbi );
+    if (len == 0)
+      return csbi.dwCursorPosition.X;
+
+    // If we're at the edge of the screen and the next character is double-
+    // width, add another space to account for it moving to the next line.
+    if (csbi.dwCursorPosition.X == screen.dwSize.X - 1 && pos < len)
+    {
+      CONSOLE_SCREEN_BUFFER_INFO csbi1;
+      WriteCon( hConWid, txt + pos, 1 );
+      GetConsoleScreenBufferInfo( hConWid, &csbi1 );
+      if (csbi1.dwCursorPosition.X == 2)
+	++csbi.dwCursorPosition.X;
+    }
+    return csbi.dwCursorPosition.Y * csbi.dwSize.X
+	   + csbi.dwCursorPosition.X - screen.dwCursorPosition.X;
   }
 
-  return len;
+  return pos;
 }
 
 
@@ -5413,8 +5532,6 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
   COORD c;
   int	j;
   DWORD mode;
-  SMALL_RECT sr;
-  CONSOLE_CURSOR_INFO cci;
 
   if (option.disable_CMDread)
   {
@@ -5444,20 +5561,38 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     check_break = 1;
 
     set_codepage();
-    hConWid = CreateConsoleScreenBuffer( GENERIC_READ | GENERIC_WRITE, 0, NULL,
-					 CONSOLE_TEXTMODE_BUFFER, NULL );
-    // Create a single long line to avoid wrapping issues.
-    sr.Left = sr.Top = sr.Bottom = 0;
-    sr.Right = screen.dwSize.X - 1;
-    SetConsoleWindowInfo( hConWid, TRUE, &sr );
-    c.X = 16384;
-    c.Y = 1;
-    SetConsoleScreenBufferSize( hConWid, c );
-    // Even though the cursor is on a different buffer, it still shows up on
-    // the normal one.
-    cci.dwSize = 1;
-    cci.bVisible = FALSE;
-    SetConsoleCursorInfo( hConWid, &cci );
+    if (dbcs)
+    {
+      SMALL_RECT sr;
+      CONSOLE_CURSOR_INFO cci;
+
+      // Create two buffers: one for the normal command line, to handle wrap;
+      // and another for file names without wrap.
+      hConWid = CreateConsoleScreenBuffer( GENERIC_READ|GENERIC_WRITE, 0, NULL,
+					   CONSOLE_TEXTMODE_BUFFER, NULL );
+      hConWid1 = CreateConsoleScreenBuffer( GENERIC_READ|GENERIC_WRITE, 0, NULL,
+					    CONSOLE_TEXTMODE_BUFFER, NULL );
+      // Turn off processed output.
+      SetConsoleMode( hConWid,	ENABLE_WRAP_AT_EOL_OUTPUT );
+      SetConsoleMode( hConWid1, ENABLE_WRAP_AT_EOL_OUTPUT );
+      // Create a single-line window; use maximum width since minimum varies.
+      sr.Left = sr.Top = sr.Bottom = 0;
+      sr.Right = screen.dwMaximumWindowSize.X - 1;
+      SetConsoleWindowInfo( hConWid,  TRUE, &sr );
+      SetConsoleWindowInfo( hConWid1, TRUE, &sr );
+      c.X = screen.dwSize.X;
+      c.Y = nNumberOfCharsToRead * 2 / c.X + 1;
+      SetConsoleScreenBufferSize( hConWid, c );
+      c.X = nNumberOfCharsToRead * 2;
+      c.Y = 1;
+      SetConsoleScreenBufferSize( hConWid1, c );
+      // Even though the cursor is on a different buffer, it still shows up on
+      // the normal one.
+      cci.dwSize = 1;
+      cci.bVisible = FALSE;
+      SetConsoleCursorInfo( hConWid,  &cci );
+      SetConsoleCursorInfo( hConWid1, &cci );
+    }
 
     if (macro_stk || mcmd.txt)
       remove_prompt();
@@ -5499,7 +5634,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	      ++dbcs_col;
 	      if (prompt.txt[j] >= 0x80)
 	      {
-		if (display_length( prompt.txt + j, 1 ) > 1)
+		if (display_length( prompt.txt + j, 0, 1 ) > 1)
 		{
 		  p_attr[p_attr_len++] = dir_col;
 		  // High-level console output adds an extra space to prevent
@@ -5536,11 +5671,10 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	}
 	c.X = 0;
 	c.Y = screen.dwCursorPosition.Y - p_attr_len / screen.dwSize.X;
-	WriteConsoleOutputAttribute( hConOut, p_attr, p_attr_len, c,
-				     lpNumberOfCharsRead );
+	WriteConsoleOutputAttribute( hConOut, p_attr, p_attr_len, c, &conwr );
       }
       else
-	*p_attr = 0;
+	p_attr_len = 0;
     }
 
     if (*cmdname)
@@ -5554,7 +5688,7 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
       if (*hstname == '-' && hstname[1] == '\0')
 	*local.hstname = '\0';
       else
-	strcpy( local.hstname, hstname );
+	wcscpy( local.hstname, hstname );
       *hstname = '\0';
     }
 
@@ -5573,12 +5707,12 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	{
 	  if (check_break > 1)
 	    break;
-	  if (line.len && line.txt[0] == '@')
+	  if (line.len != 0 && *line.txt == '@')
 	  {
 	    remove_chars( 0, 1 );
 	    dosify();
 	  }
-	  if (line.len && line.txt[0] == option.ignore_char)
+	  if (line.len != 0 && *line.txt == option.ignore_char)
 	  {
 	    remove_chars( 0, 1 );
 	    break;
@@ -5627,7 +5761,6 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
   CONSOLE_SCREEN_BUFFER_INFO csbi;
   #define TESTSIZE 40
   WCHAR before[TESTSIZE], after[TESTSIZE];
-  DWORD read;
 
   if ((macro_stk || mcmd.txt || *cmdname) &&
       nNumberOfCharsToWrite == 2 && memcmp( lpBuffer, L"\r\n", 4 ) == 0)
@@ -5647,8 +5780,8 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
       GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
       erase_coord = csbi.dwCursorPosition;
       --erase_coord.Y;
-      ReadConsoleOutputCharacterW( hConsoleOutput, before, TESTSIZE,
-				   erase_coord, &read );
+      ReadConsoleOutputCharacter( hConsoleOutput, before, TESTSIZE,
+				  erase_coord, &conwr );
     }
   }
 
@@ -5672,9 +5805,9 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 	int i;
 	for (i = 0; i < 16; ++i)
 	{
-	  ReadConsoleOutputCharacterW( hConsoleOutput, after, TESTSIZE,
-				       erase_coord, &read );
-	  if (memcmp( before, after, WSZ(read) ) == 0)
+	  ReadConsoleOutputCharacter( hConsoleOutput, after, TESTSIZE,
+				      erase_coord, &conwr );
+	  if (memcmp( before, after, WSZ(conwr) ) == 0)
 	    break;
 	  if (erase_coord.Y == 0)
 	    break;
@@ -5700,7 +5833,8 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 // - Jeffrey Richter ~ Programming Applications for Microsoft Windows 4th ed.
 
 // Macro for adding pointers/DWORDs together without C arithmetic interfering
-#define MakeVA( cast, addValue ) (cast)((DWORD_PTR)(pDosHeader)+(DWORD_PTR)(addValue))
+#define MakeVA( cast, addValue ) \
+  (cast)((DWORD_PTR)pDosHeader + (DWORD_PTR)(addValue))
 
 typedef struct
 {
@@ -5732,12 +5866,12 @@ BOOL HookAPIOneMod(
   pDosHeader = (PIMAGE_DOS_HEADER)hFromModule;
   if (IsBadReadPtr( pDosHeader, sizeof(IMAGE_DOS_HEADER) ))
   {
-    DEBUGSTR( "error: %s(%d)", __FILE__, __LINE__ );
+    DEBUGSTR( L"error: %S(%d)", __FILE__, __LINE__ );
     return FALSE;
   }
   if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
   {
-    DEBUGSTR( "error: %s(%d)", __FILE__, __LINE__ );
+    DEBUGSTR( L"error: %S(%d)", __FILE__, __LINE__ );
     return FALSE;
   }
 
@@ -5747,12 +5881,12 @@ BOOL HookAPIOneMod(
   // More tests to make sure we're looking at a "PE" image
   if (IsBadReadPtr( pNTHeader, sizeof(IMAGE_NT_HEADERS) ))
   {
-    DEBUGSTR( "error: %s(%d)", __FILE__, __LINE__ );
+    DEBUGSTR( L"error: %S(%d)", __FILE__, __LINE__ );
     return FALSE;
   }
   if (pNTHeader->Signature != IMAGE_NT_SIGNATURE)
   {
-    DEBUGSTR( "error: %s(%d)", __FILE__, __LINE__ );
+    DEBUGSTR( L"error: %S(%d)", __FILE__, __LINE__ );
     return FALSE;
   }
 
@@ -5780,7 +5914,7 @@ BOOL HookAPIOneMod(
     if (pszModName == (PSTR)pDosHeader)
       return TRUE;
 
-    if (stricmp( pszModName, "kernel32.dll" ) == 0 ||
+    if (_stricmp( pszModName, "kernel32.dll" ) == 0 ||
 	_strnicmp( pszModName, "API-MS-Win-Core-Console-", 24 ) == 0)
       break;
   }
@@ -5846,11 +5980,18 @@ BOOL ReadOptions( HKEY root )
   if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
   {
     exist = sizeof(option);
-    RegQueryValueEx( key, "Options", NULL, NULL, (LPBYTE)&option, &exist );
+    RegQueryValueEx( key, L"Options", NULL, NULL, (LPBYTE)&option, &exist );
     if (exist != sizeof(option))
-      option.base_col = option.dir_col;
+    {
+      // Update options from earlier versions (I really gotta stop being lazy
+      // using binary writes...).
+      if (exist == offsetof(Option, base_col))
+	option.base_col = option.dir_col;
+      if (exist == offsetof(Option, ignore_char))
+	option.ignore_char = option.old_ignore_char;
+    }
     exist = sizeof(cfgname);
-    RegQueryValueEx( key, "Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
+    RegQueryValueEx( key, L"Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
     RegCloseKey( key );
     return TRUE;
   }
@@ -5866,7 +6007,7 @@ BOOL ReadHistoryName( HKEY root )
   if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
   {
     exist = sizeof(local.hstname);
-    RegQueryValueEx( key, "Hstfile", NULL,NULL, (LPBYTE)local.hstname, &exist );
+    RegQueryValueEx( key,L"Hstfile", NULL,NULL, (LPBYTE)local.hstname, &exist );
     RegCloseKey( key );
     return TRUE;
   }

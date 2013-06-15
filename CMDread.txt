@@ -1,47 +1,43 @@
 
-				     CMDread
+				    CMDread
 
 			  Copyright 2006-13 Jason Hood
 
-			    Freeware.  Version 2.10
+			    Version 2.10.  Freeware
 
 
-    ===========
-    Description
-    ===========
+Description
+===========
 
     CMDread enhances the normal command line editing of CMD.EXE.  It provides
-    more editing functions and improved file name completion, along with
-    keyboard shortcuts to most items on the Edit menu.	Symbols and macros
-    can run frequently used command lines and its own associations can run
-    console-specific programs.	Macros can also be used to record and play
-    back a sequence of keystrokes.
+    more editing functions and improved file name completion, along with key-
+    board shortcuts to most items on the Edit menu.  Symbols and macros can run
+    frequently used command lines and its own associations can run console-
+    specific programs.	Macros can also be used to record and play back a seq-
+    uence of keystrokes.
 
 
-    ============
-    Requirements
-    ============
+Requirements
+============
 
     Windows 2000 or later.
 
 
-    =====
-    Usage
-    =====
+Usage
+=====
 
     Running "CMDread" will install CMDread into its parent process (typically
     CMD.EXE, but it may also work with other command processors).  Usually,
     though, you will use "-i" to start it with every instance of CMD.EXE.
 
-    ---------
-    Upgrading
-    ---------
+Upgrading
+---------
 
     Run "CMDread -i" to reflect the new name.
+    Delete "cmdkey.*" except for "cmdkey.{cfg,hst}".
 
-    -------
-    Options
-    -------
+Options
+-------
 
     There are numerous options to control CMDread's behaviour.  Briefly:
 
@@ -56,40 +52,40 @@
 	-l	minimum line length to remember
 	-o	default overwrite mode
 	-p	set character to disable translation for the current line
+	-q	set character to update the line in history
 	-r	default auto-recall mode
 	-t	disable translation
 	-u	uninstall
 	-z	disable CMDread
 	-_	treat underscore as punctuation, not part of a word
 
-    Options can also start with "/" and may be combined (e.g.: "-c /o",
-    "/c/o" and "-co" are all equivalent).  An option may be prefixed with
-    "-" or "+" to explicitly set its behaviour, otherwise it toggles (e.g.:
-    "-o" will toggle between insert and overwrite modes, "--o" will set
-    insert mode and "-+o" will set overwrite mode).  Except for "-z" all
-    these options apply to every instance of CMDread.
+    Options can also start with "/" and may be combined (e.g.: "-c /o", "/c/o"
+    and "-co" are all equivalent).  An option may be prefixed with "-" or "+"
+    to explicitly set its behaviour, otherwise it toggles (e.g.: "-o" will
+    toggle between insert and overwrite modes, "--o" will set insert mode and
+    "-+o" will set overwrite mode).  Except for "-z" all these options apply to
+    every instance of CMDread.
 
     -b - Backslash appending
 
-    When completing a directory CMDread will normally add a backslash after
-    it (e.g. "dir" --> "directory\").  Use this option to prevent anything
-    being added (like CMD.EXE, e.g. "dir" --> "directory").
+    When completing a directory CMDread will normally add a backslash (or slash
+    if that's what you've used) after it ("dir" --> "directory\").  Use this
+    option to prevent that (like CMD.EXE, "dir" --> "directory").
 
     -c - Cursor
 
-    The default insert cursor size is 25% of the font height and the over-
-    write size is 50%.	This option will swap those values, making insert
-    50% and overwrite 25%.  Alternatively, it can set the cursor sizes:
-    "-c75,100" will make the insert cursor 75% and the overwrite 100%.  It
-    is possible to set one without the other: "-c75" will make insert 75%,
-    leaving overwrite at 50%; "-c,100" will make overwrite 100%, leaving
-    insert at 25%.
+    The default insert cursor size is 25% of the font height and the overwrite
+    size is 50%.  This option will swap those values, making insert 50% and
+    overwrite 25%.  Alternatively, it can set the cursor sizes: "-c75,100" will
+    make the insert cursor 75% and the overwrite 100%.	It is possible to set
+    one without the other: "-c75" will make insert 75%, leaving overwrite at
+    50%; "-c,100" will make overwrite 100%, leaving insert at 25%.
 
     -e - Move to end
 
-    Searching the history for a matching command will normally leave the
-    cursor where it is (i.e. at the common prefix); this option will move it
-    to the end, like the history movement commands.
+    Searching the history for a matching command will normally leave the cursor
+    where it is (i.e. at the common prefix); this option will move it to the
+    end, like the history movement commands.
 
     -f - History file
 
@@ -104,9 +100,9 @@
 
     -g - Silent
 
-    Certain operations will beep to let you know something has happened
-    (e.g. going through all the completed file names).	Use this option to
-    suppress the beep and make CMDread quiet.
+    Certain operations will beep to let you know something has happened (e.g.
+    going through all the completed file names).  Use this option to suppress
+    the beep and make CMDread quiet.
 
     -h - History size
 
@@ -117,16 +113,16 @@
     -i - Install
 
     Use this option to make CMDread permanent.	It will append itself to
-    CMD.EXE's AutoRun registry setting, so every time CMD.EXE runs it will
-    also run CMDread.  This option also has the effect of making the current
-    options the new defaults.  Normally it installs for the current user;
-    use -I to install for the local machine.
+    CMD.EXE's AutoRun registry setting, so every time CMD.EXE runs it will also
+    run CMDread.  This option also has the effect of making the current options
+    the new defaults.  Normally it installs for the current user; use -I to
+    install for the local machine (if permissions allow).
 
     -k - Colours
 
-    CMDread can (and, by default, does) spice up the command line with a bit
-    of colour.	This option can turn off the colours, or set the colours you
-    would like to use:
+    CMDread can (and, by default, does) spice up the command line with a bit of
+    colour. This option can turn off the colours, or set the colours you would
+    like to use:
 
 	-kcCMD	- the command line itself
 	-kmSEL	- selected text
@@ -138,32 +134,40 @@
 	-kgGT	- prompt's greater-than sign
 
     Each uppercase sequence above is a one- or two-digit hexadecimal number
-    (see CMD.EXE's own COLOR help).  The prompt colours are only for the
-    usual $P$G prompt (any other prompt will remain uncoloured); the base
-    directory is the final directory component.  The default colours are
-    "-kc1f -km79 -kr1b -kd1b -ks1e -kp1a -kb1a -kg1e" which is blue
-    background, bright white command line, bright blue on grey selection,
-    bright cyan recording and drive letter/colon, bright yellow separator
-    and greater-than sign and bright green directory components.  Try using
-    "-kp12" to see the effect of the base directory.
+    (see CMD.EXE's own COLOR help).  The prompt colours are only for the usual
+    $P$G prompt (any other prompt will remain uncoloured); the base directory
+    is the final directory component.  The default colours are "-kc1f -km79
+    -kr1b -kd1b -ks1e -kp1a -kb1a -kg1e" which is blue background, bright white
+    command line, bright blue on grey selection, bright cyan recording and
+    drive letter/colon, bright yellow separator and greater-than sign and
+    bright green directory components.	Try using "-kp12" to see the effect of
+    the base directory.
 
     -l - Length
 
-    Lines smaller than a certain length can be excluded from being added to
-    the history by using this option.  The default is 1 (remember all lines)
-    and the maximum is 255.
+    Lines smaller than a certain length can be excluded from being added to the
+    history by using this option.  The default is 1 (remember all lines) and
+    the maximum is 255.
 
     -o - Overwrite
 
     CMDread usually functions in insert mode, where current characters are
-    pushed aside to make room for new characters.  This option sets over-
-    write mode, where current characters are replaced by new ones.
+    pushed aside to make room for new characters.  This option sets overwrite
+    mode, where current characters are replaced by new ones.
 
     -p - Ignore character
 
     Starting a line with the character specified by this option will cause
     CMDread to ignore its usual translations and leave the line unmodified.
     The default character is space.
+
+    -q - Update character
+
+    Starting a line with the character specified by this option will cause
+    CMDread to replace the current line in history, rather than creating a new
+    one.  This character must be first; ignore character (above) and dosify
+    (see below) must come after.  This character also reverses the effects of
+    the Enter/UpdateEnter and StoreErase/UpdateErase functions (see below).
 
     -r - Auto-recall
 
@@ -190,14 +194,14 @@
     example becomes two words).
 
     Finally, a file name can be given to configure CMDread.  The default name
-    is "CMDread.cfg" in the same directory as "CMDread.cmd".  The file can
-    contain anything: lines beginning with a minus ("-") and blank lines are
-    ignored (unless they are part of a macro definition); a CMDread internal
-    command will be executed; anything else will be stored in the history.
-    The format of the commands in the file is the same as if you typed them
-    from the command prompt, except there is no need to escape "^".  Lines
-    may be up to 1024 characters long.	The file is interpreted using the
-    system OEM code page, unless it starts with the UTF-8 byte-order mark.
+    is "CMDread.cfg" in the same directory as "CMDread.cmd".  The file can con-
+    tain anything: lines beginning with a dash ("-") and blank lines are ig-
+    nored (unless they are part of a macro definition); a CMDread internal com-
+    mand will be executed; anything else will be stored in the history.  The
+    format of the commands in the file is the same as if you typed them from
+    the command prompt, except there is no need to escape "^".  Lines may be up
+    to 1024 characters long.  The file is interpreted using the system OEM code
+    page, unless it starts with the UTF-8 byte-order mark.
 
     Configuration can be customised according to the initial directory by
     starting a line with "#" followed by the directory (using the full path,
@@ -205,16 +209,14 @@
     follows is the history file; otherwise the normal primary rule applies.
     The history file's path will be taken relative to the config file.
 
-    ----
-    Keys
-    ----
+Keys
+----
 
     CMDread recognises all the normal control keys, shift and control keys,
     normal, shift, control, and alt editing and function keys, and normal,
     shift, control, and shift and control backspace, tab, enter and escape.
-    Control is represented by "^", shift by "#", shift and control by "#^"
-    (but not "^#") and alt by "@".  The normal control keys are "^A" to
-    "^Z", plus:
+    Control is represented by "^", shift by "#", shift and control by "#^" (but
+    not "^#") and alt by "@".  The normal control keys are "^A" to "^Z", plus:
 
 	^@ - Ctrl+2	^[
 	^^ - Ctrl+6	^]
@@ -239,10 +241,10 @@
 	Alt+S	Scroll
 	Alt+V	Paste
 
-    Alt+keypad entry has been improved, too.  A leading zero will make the
-    number hexadecimal, using "/*-+Enter." as hex digits A to F.  A decimal
-    number between 1 and 255 will be taken as an OEM (code page) character,
-    otherwise it will be treated as Unicode (up to U+FFFF).
+    Alt+keypad entry has been improved, too.  A leading zero will make the num-
+    ber hexadecimal, using "/*-+Enter." as hex digits A to F.  A decimal number
+    between 1 and 255 will be taken as an OEM (code page) character, otherwise
+    it will be treated as Unicode (up to U+FFFF).
 
     DEFK - Define key
 
@@ -265,16 +267,15 @@
 
     LSTK - List key(s)
 
-    List the assignments of every key, or just those specified.  When list-
-    ing every key, all the normal keys will be displayed, but the modified
-    keys will not display the ignored ones.
+    List the assignments of every key, or just those specified.  When listing
+    every key, all the normal keys will be displayed, but the modified keys
+    will not display the ignored ones.
 
-    ---------
-    Functions
-    ---------
+Functions
+---------
 
-    The editing functions (in alphabetical order) with their default keys
-    and a brief description:
+    The editing functions (in alphabetical order) with their default keys and a
+    brief description:
 
     Function	   Key(s)      Description
     --------------------------------------------------------------------------
@@ -339,21 +340,21 @@
     WordLeft	   ^Left       move cursor to start of current/previous word
     WordRight	   ^Right      move cursor to start of next word
 
-    A word is a sequence of alphanumeric characters, optionally including
-    the underscore.  A string is a sequence of characters between spaces or
-    tabs.  An argument is a string which may also contain characters between
-    double quotes.  The brief descriptions above should be adequate for most
-    functions, so I will only detail a select few.
+    A word is a sequence of alphanumeric characters, optionally including the
+    underscore.  A string is a sequence of characters between spaces or tabs.
+    An argument is a string which may also contain characters between double
+    quotes.  The brief descriptions above should suffice for most functions, so
+    I will only detail a select few.
 
     CmdSep - command separator
 
     CMDread is capable of specifying several commands on the one line.	This
     key will add the character to separate those commands.  Note that this
-    character is a literal character 19, so commands can also be separated
-    by quoting ^S or using the keypad.	Note that spaces are significant
-    between the separator: "a  b" is the two commands "a " and " b".  This
-    is particularly important when the ignore character is a space.  The
-    command separator cannot be used with symbol or macro definitions.
+    character is a literal character 19, so commands can also be separated by
+    quoting ^S or using the keypad.  Note that spaces are significant between
+    the separator: "a  b" represents the two commands "a " and " b".  This is
+    particularly important when the ignore character is a space.  The command
+    separator cannot be used with symbol or macro definitions.
 
     CopyFromPrev - copy from previous command
 
@@ -364,20 +365,20 @@
 
     Searches the history for any line that contains the text you type in (or
     have already entered).  Repeating the search will look for another line,
-    not for another instance of the text on the same line.  For example, if
-    you have a line "CMDread.cmd" and search backwards for "cmd", it will
-    place you at the "k" after the first "cmd"; searching again will not
-    place you at the end after the second "cmd", but look for another line.
+    not for another instance of the text on the same line.  For example, if you
+    have a line "CMDread.cmd" and search backwards for "cmd", it will place you
+    at the "r" after the first "CMD"; searching again will not place you at the
+    end of the second "cmd", but look for another line.
 
     InsOvr - insert/overwrite toggle
 
-    Toggle between insert and overwrite modes for this line; once entered
-    the default mode will be restored for the next line.
+    Toggle between insert and overwrite modes for this line; once entered the
+    default mode will be restored for the next line.
 
     MacroToggle - macro/symbol/brace toggling
 
-    Equivalent to the "-t" command line option and will disable the usual
-    translations CMDread makes to the line, explained below.
+    Disable (or enable, if "-t" has been used) the usual translations CMDread
+    makes to the line, explained below.
 
     Quote - the next key will not be interpreted as a function
 
@@ -386,31 +387,31 @@
 
     Record - record a series of keys
 
-    Prompt for a key and remember all following keystrokes, up until Record
-    is pressed again or the line is entered.  Pressing the assigned key will
-    then play back all those keystrokes again.	The assigned key cannot be
-    any key assigned to Enter, Erase or Record.
+    Prompt for a key and remember all following keystrokes, up until Record is
+    pressed again or the line is entered.  Pressing the assigned key will then
+    play back all those keystrokes again.  The assigned key cannot be any key
+    assigned to Enter, Erase or Record.
 
     Revert - undo/redo everything
 
-    If the previous function was Undo or Revert, Revert will Redo every-
-    thing, otherwise it will Undo everything.
+    If the previous function was Undo or Revert, Revert will Redo everything,
+    otherwise it will Undo everything.
 
     Select - select text
 
     Using this will mark the current (or last, if at the end) character; use
-    the normal movement functions to extend the selection.  Cut will make a
-    copy of the selection, then delete it; DelLeft & DelRight will just del-
-    ete it; Paste will replace it (provided something has been Cut); any-
-    thing else will just remove the selection.
+    the normal movement functions to extend the selection.  Cut will remember
+    the selection, then delete it; DelLeft & DelRight will just delete it;
+    Paste will replace it (provided something has been Cut); anything else will
+    just remove the mark.
 
     Undo - undo changes to the line
 
-    Any function that modifies the line can be undone (and redone, if no
-    further changes are made).	Repeated uses of a function are all undone
-    at once, with two exceptions: characters will undo to the start of a
-    word and file name completion to the prefix.  Recalling a line from the
-    history will reset the undo.
+    Any function that modifies the line can be undone (and redone, if no fur-
+    ther changes are made).  Repeated uses of a function are all undone at
+    once, with two exceptions: characters will undo to the start of a word and
+    file name completion to the prefix.  Recalling a line from the history will
+    reset the undo.
 
     UpdateEnter, UpdateErase - update the history
 
@@ -419,58 +420,56 @@
 
     VarSubst - inline variable substitution/brace expansion/association
 
-    Expand braces and variables, perform association, expand a macro (using
-    the command separator to combine multiple lines) and expand a symbol, in
-    that order.  Editing then continues on the expanded line.  Variables are
-    either environment variables or symbols, enclosed within percent signs.
+    Expand braces and variables, perform association, expand a macro (using the
+    command separator to combine multiple lines) and expand a symbol, in that
+    order.  Editing then continues on the expanded line.  Variables are either
+    environment variables or symbols, enclosed within percent signs.
 
-    --------------------
-    File Name Completion
-    --------------------
+File Name Completion
+--------------------
 
-    CMDread examines the argument to the left of the cursor and tries to
-    complete it as a file name.  The argument may contain a full disk and
-    path specification.  If several files match, only the common part of
-    their names will be placed on the command line, unless the argument
-    already contained a wildcard.  Subsequent action depends on the method
-    of completion chosen: list or cycle.
+    CMDread examines the argument to the left of the cursor and tries to com-
+    plete it as a file name.  The argument may contain a full disk and path
+    specification.  If several files match, only the common part of their names
+    will be placed on the command line, unless the argument already contained a
+    wildcard.  Subsequent action depends on the method of completion chosen:
+    list or cycle.
 
-    In list mode, a list of all possible matching names is displayed.  If
-    there are more names than would fit on the screen CMDread asks if they
-    should be displayed; if there are more names than would fit in the con-
-    sole buffer CMDread does not display them at all.
+    In list mode, a list of all possible matching names is displayed.  If there
+    are more names than would fit on the window CMDread asks if they should be
+    displayed; if there are more names than would fit in the console buffer
+    CMDread does not display them at all.
 
     In cycle mode, all matches will be displayed in turn.  Once all matches
     have been displayed the original common part will be displayed, then the
     cycle will continue again.
 
     If the name to be completed is the first argument on the line then only
-    executables and directories will be selected.  Executables are defined
-    by CMDread's and Window's associations and one of the "FEXEC" or
-    "PATHEXT" environment variables.  If neither of those variables is
-    defined the default list is
+    executables and directories will be selected.  Executables are defined by
+    CMDread's and Window's associations and one of the "FEXEC" or "PATHEXT"
+    environment variables.  If neither of those variables is defined the def-
+    ault list is
 
 	set FEXEC=.exe.com.bat.cmd
 
     If it's not the first argument then certain extensions will be ignored.
-    These can be selected with the "FIGNORE" environment variable.  The
-    default list is:
+    These can be selected with the "FIGNORE" environment variable.  The default
+    list is:
 
 	set FIGNORE=.exe.com.dll.obj.o.bak
 
-    If a file with an ignored extension is the only such file then it will
-    be selected.  Files with no extension can be selected by having a dot by
-    itself (e.g.: "set FIGNORE=.exe.com.dll.obj.o.bak.").
+    If a file with an ignored extension is the only such file then it will be
+    selected.  Files with no extension can be selected by having a dot by it-
+    self (e.g.: "set FIGNORE=.exe.com.dll.obj.o.bak.").
 
-    If the matching name is a directory a "\" or "/" is appended, making it
-    easier to enter a complete path specification (unless this has been
-    disabled with the "-b" command line option, in which case nothing is
-    appended).	If the matching name is not a directory a space is placed
-    after the name.
+    If the matching name is a directory a "\" or "/" is appended (depending on
+    what you've entered yourself), making it easier to enter a complete path
+    specification (unless this has been disabled with the "-b" command line
+    option, in which case nothing is appended).  If the matching name is not a
+    directory a space is placed after the name.
 
-    ---------------
-    Brace Expansion
-    ---------------
+Brace Expansion
+---------------
 
     Brace expansion is usually used as a shorthand method of naming files.
     Instead of having to type:
@@ -481,8 +480,8 @@
 
 	del temp\file{1,2}.tmp
 
-    The list inside the braces must be comma-separated, and it will recog-
-    nise spaces:
+    The list inside the braces must be comma-separated, and it will recognise
+    spaces:
 
 	del temp\file{1, 2}.tmp
 
@@ -498,8 +497,8 @@
 
 	del "temp\file1.tmp" "temp\file 2.tmp"
 
-    Braces can be nested, and the expansion will also recognise commas,
-    semicolons and plus signs as separators and "<|>&" as terminators:
+    Braces can be nested, and the expansion will also recognise commas, semi-
+    colons and plus signs as separators and "<|>&" as terminators:
 
 	tc file1;temp{2,3},exclude{4,5}>nul
 
@@ -507,14 +506,13 @@
 
 	tc file1;temp2;temp3,exclude4,exclude5>nul
 
-    -
-    @
-    -
+@
+-
 
     When used at the start of a line "@" is a special command line modifier
     which asks CMDread to "dosify" the line.  CMDread will replace "/" with
-    "\", leading "-"s with "/" and remove trailing backslashes from the
-    line.  For example, if you type:
+    "\", leading "-"s with "/" and remove trailing backslashes from the line.
+    For example, if you type:
 
 	@rd -q /old/directory/
 
@@ -522,32 +520,31 @@
 
 	rd /q \old\directory
 
-    -
-    ^
-    -
+^
+-
 
     As with CMD.EXE, CMDread uses the "^" character as an escape character.
-    Any character following it will be treated as a literal character, los-
-    ing any special significance CMDread would give it. Of particular note
-    is specifying control keys on the command line, which require two "^"
-    characters to be recognised (e.g.: "lstk ^^a").
+    Any character following it will be treated as a literal character, losing
+    any special significance CMDread would give it.  Of particular note is
+    specifying control keys on the command line, which require two "^" char-
+    acters to be recognised (e.g.: "lstk ^^a").  However, within strings, back-
+    slash should be used to escape a quote (`defk ^^p "\"Program Files\""').
 
-    -------
-    History
-    -------
+History
+-------
 
-    The history stores each line that has been entered (provided it meets
-    the minimum length requirements of "-l").  Moving through the history is
-    a cyclic operation, so if you come to the end it will continue from the
-    start.  Erasing a line will move the history back to the start.  A line
-    is only stored once, matching case.  Searching, however, is always done
-    ignoring case.  A search is successful when all the characters from the
-    beginning of the line up to the cursor are matched.
+    The history stores each line that has been entered (provided it meets the
+    minimum length requirements of "-l").  Moving through the history is a
+    cyclic operation, so if you come to the end it will continue from the
+    start.  Erasing a line will move the history back to the start.  A line is
+    only stored once, matching case.  Searching, however, is always done ig-
+    noring case.  A search is successful when all the characters from the beg-
+    inning of the line up to the cursor are matched.
 
     DELH - Delete history
 
-    Lines containing text will be removed from the history.  This includes
-    the DELH line itself.
+    Lines containing text will be removed from the history.  This includes the
+    DELH line itself.
 
 	DELH rem
 
@@ -556,11 +553,11 @@
     LSTH - List history
 
     List every command in the history, the last N commands, the first N com-
-    mands or every command containing text.  The LSTH command itself will
-    only be included when listing every command.  This command treats quotes
-    as literal characters (although a redirected file name must still be
-    quoted as usual) and trailing spaces are significant (but a space before
-    ">" or "|" is removed).
+    mands or every command containing text.  The LSTH command itself will only
+    be included when listing every command.  This command treats quotes as lit-
+    eral characters (although a redirected file name must still be quoted as
+    usual) and trailing spaces are significant (but a space before ">" or "|"
+    is removed).
 
 	LSTH 5		  list the last five lines
 	LSTH -5 	  list the first five lines
@@ -572,17 +569,16 @@
 
     Remove every command in the history.
 
-    ----------------
-    File Association
-    ----------------
+File Association
+----------------
 
     DEFA - Define association
 
-    Directories and certain extensions can be "directly" executed from the
-    command line.  If the first argument on the line ends in either a slash
-    or backslash (ie. "/" or "\") it will be treated as a directory and have
-    the definition of the backslash association inserted and the trailing
-    (back)slash removed:
+    Directories and certain extensions can be "directly" executed from the com-
+    mand line.	If the first argument on the line ends in either a slash or
+    backslash (i.e. "/" or "\") it will be treated as a directory and have the
+    definition of the backslash association inserted and the trailing character
+    removed:
 
 	defa \ @cd
 	utils/
@@ -606,8 +602,8 @@
 
 	defa .c.asm. tde
 
-    will associate C, assembly and extensionless files to tde.	However,
-    remember to type the dot yourself, file name completion will not add it.
+    will associate C, assembly and extensionless files to tde.	However, remem-
+    ber to type the dot yourself, as file name completion will not add it.
 
     A secondary association can be made by appending "=" to the extension:
 
@@ -620,8 +616,8 @@
 
     DELA - Delete association(s)
 
-    Associations can be removed by using DELA.	Supply either a complete
-    list or individual extensions:
+    Associations can be removed by using DELA.	Supply either a complete list
+    or individual extensions:
 
 	dela .txt.doc
 
@@ -633,8 +629,8 @@
 
     LSTA - List association(s)
 
-    List all associations, or just those specified.  Each specific exten-
-    sion will be listed individually, even if it is part of a list.
+    List all associations, or just those specified.  Each specific extension
+    will be listed individually, even if it is part of a list.
 
 	lsta .txt .doc	==>  defa .txt view
 			     defa .doc view
@@ -643,14 +639,13 @@
 
     Remove every association.
 
-    -------
-    Symbols
-    -------
+Symbols
+-------
 
     DEFS - Define symbol
 
-    Symbols (also known as aliases) replace a word at the beginning of the
-    line with any sequence of characters.
+    Symbols (also known as aliases) replace a word at the beginning of the line
+    with any sequence of characters.
 
 	defs dw dir /w
 	dw/b directory
@@ -659,8 +654,8 @@
 
 	dir /w /b directory
 
-    Redefining a symbol will replace the previous definition; defining a
-    symbol the same name as a macro will remove the macro definition.
+    Redefining a symbol will replace the previous definition; defining a symbol
+    the same name as a macro will remove the macro definition.
 
     DELS - Delete symbol(s)
 
@@ -674,20 +669,18 @@
 
     Remove every symbol.
 
-    ------
-    Macros
-    ------
+Macros
+------
 
     DEFM - Define macro
 
     Multi-line command macros are created by issuing the DEFM macro-name
-    command.  Each line is terminated by hitting Enter, and the macro is
-    terminated with the ENDM command.  Macro command lines may contain para-
-    meters, which are designated by %N (N is a numeral from 0-9); %N* is
-    shorthand for parameter N and all parameters after it; %* is shorthand
-    for %1*.  Macros will stop processing parameters at one of "<>|&"; if
-    found, the rest of the line will be appended after the definition of the
-    first line.
+    command.  Each line is terminated by hitting Enter, and the macro is term-
+    inated with the ENDM command.  Macro command lines may contain parameters,
+    which are designated by %N (N is a numeral from 0-9); %N* is shorthand for
+    parameter N and all parameters after it; %* is shorthand for %1*.  Macros
+    will stop processing parameters at one of "<>|&"; if found, the rest of the
+    line will be appended after the definition of the first line.
 
 	defm v unzip -c %* | view
 	v zipfile file_id.diz readme.txt
@@ -714,8 +707,8 @@
 	md dir1 2>nul
 	cd dir1
 
-    The name may be left out, in which case the macro will expand on an
-    empty line.
+    The name may be left out, in which case the macro will expand on an empty
+    line.
 
 	defm
 	time/t
@@ -739,9 +732,8 @@
     Remove every macro.
 
 
-    ==============
-    Known Problems
-    ==============
+Known Problems
+==============
 
     If you have scrolled the window to move the current line to the bottom,
     recalling a command that extends to the next line will not scroll the
@@ -753,27 +745,36 @@
 
 	path %CD%;%path%
 
-    but I also have ";" defined as a symbol, so it leaves "%CD", expands
-    "%;%" and leaves "path%".  The solution is to escape the semicolon:
+    but I also have ";" defined as a symbol, so it leaves "%CD", expands "%;%"
+    and leaves "path%".  A solution is to escape the semicolon:
 
 	path %CD%^;%path%
 
+    Redirecting internal commands will use the current code page, but if a
+    character cannot be converted, it will not be written (rather than becoming
+    a question mark).
 
-    =======
-    History
-    =======
+
+History
+=======
 
     Legend: + added, - bug-fixed, * changed.
 
-    v2.10, 6 June, 2013:
+    v2.10, 15 June, 2013:
     * renamed from CMDkey to CMDread (Microsoft already has a Cmdkey);
     - fixed file name completion testing for directory on an empty name;
     - fixed exe/dll version conflicts (improved future-proofing);
+    - fixed redefining a keyboard macro;
+    - fixed interpretation of the config file custom history file;
+    - test if -I/-U fails and show message (need admin rights);
     * improved (un)install;
     * copy history from primary instance if there's no parent;
+    * improved file name completion list;
+    * tweak stats display (remove initial blank line, add underscore setting);
     + 64-bit version;
     + Windows 8 support;
-    + DBCS double-width character support.
+    + DBCS double-width character support;
+    + use a prefix character to update history.
 
     v2.01, 8 December, 2011:
     * fully work with ANSICON.
@@ -838,5 +839,5 @@
     + first release.
 
 
-    =========================
-    Jason Hood, 6 June, 2013.
+==========================
+Jason Hood, 15 June, 2013.

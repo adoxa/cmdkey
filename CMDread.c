@@ -27,11 +27,11 @@
   * removed NT version
   - fixed initial install.
 
-  v2.10, 14 & 15 June, 2012:
+  14 & 15 June, 2012:
   * modified injection (use VirtualAllocEx method, not stack);
   + 64-bit version;
   - search for the local export (improved future-proofing);
-  - install/uninstall will replace/remove a string containing "CMDread" or
+  - install/uninstall will replace/remove a string containing "cmdread" or
     "cmdkey".
 
   21 May, 2013:
@@ -44,41 +44,35 @@
   6 June, 2013:
   * renamed from CMDkey to CMDread to avoid potential confusion/conflict with
     Microsoft's Cmdkey.
+
+  v2.10, 11 to 15 June, 2013:
+  * use Unicode;
+  + -q option to set prefix character to always update the history line;
+  - verify the registry key is created (HKLM requires admin privileges);
+  * remove the initial blank line in the stats, add underscore setting.
 */
 
-#define PDATE "6 June, 2013"
+#define PDATE L"15 June, 2013"
 
-#define WIN32_LEAN_AND_MEAN
-#define _WIN32_WINNT 0x0500
-#include <windows.h>
-#include <tlhelp32.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
 #include "CMDread.h"
 #include "version.h"
-
-#ifndef offsetof
-# define offsetof(type, member) (size_t)(&(((type*)0)->member))
-#endif
+#include <tlhelp32.h>
 
 #ifdef __MINGW32__
 int _CRT_glob = 0;
 #endif
 
 
-#define CMDREAD	"Software\\Microsoft\\Command Processor"
-#define AUTORUN "AutoRun"
+#define CMDREAD L"Software\\Microsoft\\Command Processor"
+#define AUTORUN L"AutoRun"
 
 #ifdef _WIN64
-#define ARCH "amd64"
-#define EDITDLLW L"edit_amd64.dll"
+#define ARCH L"amd64"
+#define EDITDLL L"edit_" ARCH L".dll"
 #else
-#define ARCH "x86"
-#define EDITDLLW L"edit_x86.dll"
+#define ARCH L"x86"
+#define EDITDLL L"edit.dll"
 #endif
-#define EDITDLL "edit_" ARCH ".dll"
 
 
 void status( void );
@@ -89,49 +83,77 @@ DWORD GetParentProcessId( void );
 BOOL  IsInstalled( DWORD id, PBYTE* base );
 void  GetStatus( DWORD id, PBYTE base );
 void  Inject( HANDLE hProcess );
+BOOL  GetRegKey( LPCWSTR, HKEY, LPCWSTR, PHKEY, LPDWORD );
 
 
-int    installed	 __attribute__((dllimport));
-DWORD  parent_pid	 __attribute__((dllimport));
-Option option		 __attribute__((dllimport));
-char   cfgname[MAX_PATH] __attribute__((dllimport));
-char   cmdname[MAX_PATH] __attribute__((dllimport));
-char   hstname[MAX_PATH] __attribute__((dllimport));
-Status local		 __attribute__((dllimport));
+__declspec(dllimport) int    installed;
+__declspec(dllimport) DWORD  parent_pid;
+__declspec(dllimport) Option option;
+__declspec(dllimport) WCHAR  cfgname[MAX_PATH];
+__declspec(dllimport) WCHAR  cmdname[MAX_PATH];
+__declspec(dllimport) WCHAR  hstname[MAX_PATH];
+__declspec(dllimport) Status local;
 
 
-int main( int argc, char* argv[] )
+#if defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR)
+// Thanks to Coder for Life.
+// http://www.coderforlife.com/projects/utilities/
+int wmain();
+void __wgetmainargs( int*, wchar_t***, wchar_t***, int, int* );
+int main()
+{
+  wchar_t **argv, **envp;
+  int argc, si = 0;
+  __wgetmainargs( &argc, &argv, &envp, 0, &si );
+  return wmain( argc, argv );
+}
+#endif
+
+int wmain( int argc, wchar_t* argv[] )
 {
   DWORD  pid;
   HANDLE ph;
   PBYTE  base;
   BOOL	 active, update;
-  char*  arg;
-  char*  end;
+  LPWSTR arg;
+  LPWSTR end;
   char*  opt;
+  LPWSTR ops;
   char	 state;
-  char*  fname;
-  unsigned long num;
+  LPWSTR fname;
+  ULONG  num;
   HKEY	 key, root;
   DWORD  exist;
-  char	 CMDread[MAX_PATH+4];
+  WCHAR  CMDread[MAX_PATH+4];
   BOOL	 hstfile;
   UCHAR* colour = NULL;
   int	 j;
   DWORD  len, type;
-  char*  cmdpos;
+  LPWSTR cmdpos;
+  char	 cp[16];
+
+  // Thanks to Michael Kaplan.
+  // http://blogs.msdn.com/b/michkap/archive/2010/10/07/10072032.aspx
+  // However, it seems the fputws in MSVCRT.DLL (Win7 HP 64-bit) doesn't work
+  // with _O_U16TEXT.
+  if (_isatty( 1 ))
+    _setmode( 1, _O_U16TEXT );
+
+  // Set the locale code page so wide-string conversions work as expected.
+  sprintf( cp, ".%u", GetConsoleOutputCP() );
+  setlocale( LC_CTYPE, cp );
 
   if (argc > 1)
   {
-    if (strcmp( argv[1], "--help" ) == 0 ||
+    if (wcscmp( argv[1], L"--help" ) == 0 ||
 	((argv[1][0] == '-' || argv[1][0] == '/') && argv[1][1] == '?'))
     {
       help();
       return 0;
     }
-    if (strcmp( argv[1], "--version" ) == 0)
+    if (wcscmp( argv[1], L"--version" ) == 0)
     {
-      puts( "CMDread (" ARCH ") version " PVERS " (" PDATE ")." );
+      _putws( L"CMDread (" ARCH L") version " PVERS L" (" PDATE L")." );
       return 0;
     }
   }
@@ -148,7 +170,6 @@ int main( int argc, char* argv[] )
   fname = (active) ? cmdname : cfgname;
   root = HKEY_CURRENT_USER;
   hstfile = FALSE;
-  len = 0;
 
   for (j = 1; j < argc; ++j)
   {
@@ -156,7 +177,7 @@ int main( int argc, char* argv[] )
     {
       if (!argv[j][1])
       {
-	puts( "CMDread: missing option." );
+	wprintf( L"CMDread: missing option (argument %d).\n", j );
 	return 1;
       }
       for (arg = argv[j] + 1; *arg; arg = end)
@@ -169,13 +190,13 @@ int main( int argc, char* argv[] )
 	  state = (active) ? -1 : 1;
 	if (!*arg)
 	{
-	  puts( "CMDread: missing option." );
+	  wprintf( L"CMDread: missing option (argument %d).\n", j );
 	  return 1;
 	}
 	opt = NULL;
-	num = strtoul( arg + 1, &end, 10 );
+	num = wcstoul( arg + 1, &end, 10 );
 
-	switch (tolower( *arg ))
+	switch (towlower( *arg ))
 	{
 	  case '/': break;              // allow something like /b/e
 
@@ -187,7 +208,7 @@ int main( int argc, char* argv[] )
 	  case 't': opt = &option.disable_macro; break;
 	  case '_': opt = &option.underscore;    break;
 
-	  case 'z': option.disable_CMDread = 1;   break;
+	  case 'z': option.disable_CMDread = 1;  break;
 
 	  case 'c':
 	    if (end == arg + 1)
@@ -204,12 +225,12 @@ int main( int argc, char* argv[] )
 	  case ',':
 	    if (end == arg + 1)
 	    {
-	      puts( "CMDread: missing cursor size." );
+	      _putws( L"CMDread: missing cursor size." );
 	      return 1;
 	    }
 	    if (num > 100)
 	    {
-	      puts( "CMDread: cursor size must be between 0 and 100." );
+	      _putws( L"CMDread: cursor size must be between 0 and 100." );
 	      return 1;
 	    }
 	    option.cursor_size[(*arg == ',')] = (char)num;
@@ -219,27 +240,27 @@ int main( int argc, char* argv[] )
 	    end = arg + 1;
 	    switch (*end | 0x20)
 	    {
-	      case 'c': colour = &option.cmd_col; break;
-	      case 'r': colour = &option.rec_col; break;
-	      case 'd': colour = &option.drv_col; break;
-	      case 's': colour = &option.sep_col; break;
-	      case 'p': colour = &option.dir_col; break;
+	      case 'c': colour = &option.cmd_col;  break;
+	      case 'r': colour = &option.rec_col;  break;
+	      case 'd': colour = &option.drv_col;  break;
+	      case 's': colour = &option.sep_col;  break;
+	      case 'p': colour = &option.dir_col;  break;
 	      case 'b': colour = &option.base_col; break;
-	      case 'g': colour = &option.gt_col;  break;
-	      case 'm': colour = &option.sel_col; break;
-	      default:	opt = &option.nocolour; break;
+	      case 'g': colour = &option.gt_col;   break;
+	      case 'm': colour = &option.sel_col;  break;
+	      default:	opt    = &option.nocolour; break;
 	    }
 	    if (opt)
 	      break;
 	    ++end;
-	    if (!isxdigit( *end ))
+	    if (!iswxdigit( *end ))
 	    {
-	      printf( "CMDread: expecting hexadecimal digit for -k%c.\n",
-		      end[-1] | 0x20 );
+	      wprintf( L"CMDread: expecting hexadecimal digit for -k%c.\n",
+		       end[-1] | 0x20 );
 	      return 1;
 	    }
 	    num = (*end > '9') ? (*end | 0x20) - 'a' + 10 : *end - '0';
-	    if (isxdigit( *++end ))
+	    if (iswxdigit( *++end ))
 	    {
 	      num = num * 16 + ((*end > '9') ? (*end | 0x20) - 'a' + 10
 					     : *end - '0');
@@ -252,16 +273,26 @@ int main( int argc, char* argv[] )
 	    end = arg + 1;	// on the odd chance of it being a digit
 	    if (!*end)
 	    {
-	      puts( "CMDread: missing macro ignore character." );
+	      _putws( L"CMDread: missing macro ignore character." );
 	      return 1;
 	    }
 	    option.ignore_char = *end++;
 	  break;
 
+	  case 'q':
+	    end = arg + 1;	// on the odd chance of it being a digit
+	    if (!*end)
+	    {
+	      _putws( L"CMDread: missing history update character." );
+	      return 1;
+	    }
+	    option.update_char = *end++;
+	  break;
+
 	  case 'l':
 	    if (end == arg + 1 || num == 0 || num > 255)
 	    {
-	      puts( "CMDread: line length must be between 1 and 255." );
+	      _putws( L"CMDread: line length must be between 1 and 255." );
 	      return 1;
 	    }
 	    option.min_length = (UCHAR)num;
@@ -270,7 +301,7 @@ int main( int argc, char* argv[] )
 	  case 'h':
 	    if (num > 255)
 	    {
-	      puts( "CMDread: history size must be between 0 and 255." );
+	      _putws( L"CMDread: history size must be between 0 and 255." );
 	      return 1;
 	    }
 	    option.histsize = (UCHAR)num;
@@ -279,54 +310,55 @@ int main( int argc, char* argv[] )
 	  case 'i':
 	    if (*arg == 'I')
 	      root = HKEY_LOCAL_MACHINE;
-	    len = GetModuleFileName( NULL, CMDread+2, sizeof(CMDread) - 3 ) + 2;
-	    strlwr( CMDread + 2 );
+	    len = GetModuleFileName( NULL, CMDread + 2, MAX_PATH ) + 2;
+	    _wcslwr( CMDread + 2 );
 	    CMDread[0] = '&';
 	    CMDread[1] = '"';
 	    // Strip the processor type (too bad if it's been renamed).
 	    while (CMDread[--len] != '_' && CMDread[len] != '\\' && len != 0) ;
-	    strcpy( CMDread + len, ".cmd\"" );
+	    wcscpy( CMDread + len, L".cmd\"" );
 	    len += 5;
 	    // Add CMDread to CMD.EXE's AutoRun setting, if not already present.
-	    RegCreateKeyEx( root, CMDREAD, 0, "", REG_OPTION_NON_VOLATILE,
-			    KEY_ALL_ACCESS, NULL, &key, &exist );
+	    if (!GetRegKey( L"add AutoRun", root, CMDREAD, &key, &exist ))
+	      return 1;
 	    exist = 0;
 	    RegQueryValueEx( key, AUTORUN, NULL, NULL, NULL, &exist );
-	    opt = malloc( exist + len );
-	    if (!opt)
+	    ops = malloc( exist + WSZ(len) );
+	    if (!ops)
 	    {
-	      puts( "CMDread: where's all the memory gone?" );
+	      _putws( L"CMDread: where's all the memory gone?" );
 	      return 1;
 	    }
-	    if (exist > sizeof(TCHAR))
+	    if (exist > sizeof(WCHAR))
 	    {
-	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
-	      cmdpos = strstr( opt, "cmdread" );
+	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)ops, &exist );
+	      cmdpos = wcsstr( ops, L"cmdread" );
 	      if (!cmdpos)
-		cmdpos = strstr( opt, "cmdkey" );
+		cmdpos = wcsstr( ops, L"cmdkey" );
 	      if (!cmdpos)
 	      {
-		strcpy( opt + --exist, CMDread );
-		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt, exist+len );
+		wcscpy( ops + --exist, CMDread );
+		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)ops,
+			       exist + WSZ(len) );
 	      }
 	      else
 	      {
-		char* end = cmdpos + 6;
-		while (cmdpos != opt && *--cmdpos != '"') ;
+		LPWSTR end = cmdpos + 6;
+		while (cmdpos != ops && *--cmdpos != '"') ;
 		while (*end != '\0' && *end++ != '"') ;
-		memmove( cmdpos + len - 1, end, exist - (end - opt) );
-		memcpy( cmdpos, CMDread + 1, len - 1 );
-		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt,
-			       strlen( opt ) + 1 );
+		memmove( cmdpos + len - 1, end, exist - WSZ(end - ops) );
+		memcpy( cmdpos, CMDread + 1, WSZ(len - 1) );
+		RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)ops,
+			       WSZ(wcslen( ops ) + 1) );
 	      }
 	    }
 	    else
 	    {
-	      RegSetValueEx( key, AUTORUN, 0, REG_SZ, (LPBYTE)CMDread+1, len );
+	      RegSetValueEx( key, AUTORUN, 0, REG_SZ, (LPBYTE)(CMDread + 1),
+			     WSZ(len) );
 	    }
 	    RegCloseKey( key );
-	    free( opt );
-	    opt = NULL;
+	    free( ops );
 	    update = TRUE;
 	  break;
 
@@ -334,43 +366,42 @@ int main( int argc, char* argv[] )
 	    if (*arg == 'U')
 	      root = HKEY_LOCAL_MACHINE;
 	    // Remove CMDread from CMD.EXE's AutoRun setting.
-	    RegCreateKeyEx( root, CMDREAD, 0, "", REG_OPTION_NON_VOLATILE,
-			    KEY_ALL_ACCESS, NULL, &key, &exist );
+	    if (!GetRegKey( L"remove AutoRun", root, CMDREAD, &key, &exist ))
+	      return 1;
 	    exist = 0;
 	    RegQueryValueEx( key, AUTORUN, NULL, NULL, NULL, &exist );
 	    if (exist)
 	    {
-	      opt = malloc( exist );
-	      if (!opt)
+	      ops = malloc( exist );
+	      if (!ops)
 	      {
-		puts( "CMDread: where's all the memory gone?" );
+		_putws( L"CMDread: where's all the memory gone?" );
 		return 1;
 	      }
-	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)opt, &exist );
-	      cmdpos = strstr( opt, "cmdread" );
+	      RegQueryValueEx( key, AUTORUN, NULL, &type, (LPBYTE)ops, &exist );
+	      cmdpos = wcsstr( ops, L"cmdread" );
 	      if (!cmdpos)
-		cmdpos = strstr( opt, "cmdkey" );
+		cmdpos = wcsstr( ops, L"cmdkey" );
 	      if (cmdpos)
 	      {
-		len = cmdpos - opt + 6;
-		while (cmdpos != opt && *--cmdpos != '"') ;
-		while (opt[len] != '\0' && opt[len++] != '"') ;
-		len -= cmdpos - opt;
-		if (cmdpos == opt && exist == len + 1)
+		len = cmdpos - ops + 6;
+		while (cmdpos != ops && *--cmdpos != '"') ;
+		while (ops[len] != '\0' && ops[len++] != '"') ;
+		len -= cmdpos - ops;
+		if (cmdpos == ops && exist == WSZ(len + 1))
 		  RegDeleteValue( key, AUTORUN );
 		else
 		{
-		  if (cmdpos > opt && cmdpos[-1] == '&')
+		  if (cmdpos > ops && cmdpos[-1] == '&')
 		    --cmdpos, ++len;
 		  else if (cmdpos[len] == '&')
 		    ++len;
-		  memcpy( cmdpos, cmdpos + len, exist - len );
-		  RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)opt,
-				 exist - len );
+		  memcpy( cmdpos, cmdpos + len, exist - WSZ(len) );
+		  RegSetValueEx( key, AUTORUN, 0, type, (LPBYTE)ops,
+				 exist - WSZ(len) );
 		}
 	      }
-	      free( opt );
-	      opt = NULL;
+	      free( ops );
 	    }
 	    RegCloseKey( key );
 	    active = TRUE;
@@ -378,12 +409,12 @@ int main( int argc, char* argv[] )
 
 	  case 'f':
 	    hstfile = TRUE;
-	    end = strchr( arg + 1, '\0' );
-	    memcpy( hstname, arg + 1, end - arg );
+	    end = wcschr( arg + 1, '\0' );
+	    memcpy( hstname, arg + 1, WSZ(end - arg) );
 	  break;
 
 	  default:
-	    printf( "CMDread: invalid option: '%c'.\n", *arg );
+	    wprintf( L"CMDread: invalid option: '%c'.\n", *arg );
 	  return 1;
 	}
 	if (opt)
@@ -397,48 +428,51 @@ int main( int argc, char* argv[] )
     }
     else
     {
-      FILE* tmp = fopen( argv[j], "r" );
+      FILE* tmp = _wfopen( argv[j], L"r" );
       if (tmp == NULL)
       {
-	printf( "CMDread: could not open \"%s\".\n", argv[j] );
+	wprintf( L"CMDread: could not open \"%s\".\n", argv[j] );
 	return 1;
       }
       fclose( tmp );
-      strcpy( fname, argv[j] );
+      wcscpy( fname, argv[j] );
     }
   }
   if (update)
   {
     if (hstfile && *hstname)
-      GetFullPathName( hstname, sizeof(hstname), hstname, NULL );
+      GetFullPathName( hstname, lenof(hstname), hstname, NULL );
     if (*fname)
-      GetFullPathName( fname, sizeof(cfgname), cfgname, NULL );
+      GetFullPathName( fname, lenof(cfgname), cfgname, NULL );
     else if (installed == -1)
     {
-      j = GetModuleFileName( NULL, cfgname, sizeof(cfgname) );
+      j = GetModuleFileName( NULL, cfgname, lenof(cfgname) );
       // Strip the processor type (too bad if it's been renamed).
       while (cfgname[--j] != '_' && cfgname[j] != '\\' && j != 0) ;
-      strcpy( cfgname + j, ".cfg" );
+      wcscpy( cfgname + j, L".cfg" );
       if (!hstfile)
       {
-	memcpy( hstname, cfgname, j );
-	strcpy( hstname + j, ".hst" );
+	memcpy( hstname, cfgname, WSZ(j) );
+	wcscpy( hstname + j, L".hst" );
 	hstfile = TRUE;
       }
     }
 
-    RegCreateKeyEx( root, REGKEY, 0, "", REG_OPTION_NON_VOLATILE,
-		    KEY_ALL_ACCESS, NULL, &key, &exist );
-    RegSetValueEx( key, "Options", 0, REG_BINARY, (LPBYTE)&option, sizeof(option) );
-    RegSetValueEx( key, "Cmdfile", 0, REG_SZ, (LPBYTE)cfgname, strlen( cfgname ) + 1 );
+    if (!GetRegKey( L"update options", root, REGKEY, &key, &exist ))
+      return 1;
+    RegSetValueEx( key, L"Options", 0, REG_BINARY, (LPBYTE)&option,
+		   sizeof(option) );
+    RegSetValueEx( key, L"Cmdfile", 0, REG_SZ, (LPBYTE)cfgname,
+		   WSZ(wcslen( cfgname ) + 1) );
     if (hstfile)
-      RegSetValueEx( key, "Hstfile", 0, REG_SZ, (LPBYTE)hstname, strlen( hstname ) + 1 );
+      RegSetValueEx( key, L"Hstfile", 0, REG_SZ, (LPBYTE)hstname,
+		     WSZ(wcslen( hstname ) + 1) );
     RegCloseKey( key );
   }
   else if (hstfile)
   {
     if (*hstname)
-      GetFullPathName( hstname, sizeof(hstname), hstname, NULL );
+      GetFullPathName( hstname, lenof(hstname), hstname, NULL );
     else
     {
       *hstname = '-';
@@ -451,7 +485,7 @@ int main( int argc, char* argv[] )
     ph = OpenProcess( PROCESS_ALL_ACCESS, FALSE, pid );
     if (ph == NULL)
     {
-      puts( "CMDread: could not open parent process." );
+      _putws( L"CMDread: could not open parent process." );
       return 1;
     }
     Inject( ph );
@@ -465,64 +499,83 @@ int main( int argc, char* argv[] )
 // Display the current status of CMDread.
 void status( void )
 {
-  char buf[4];
-  char name[MAX_PATH+2];
-  char hst[MAX_PATH+8];
+  WCHAR buf[4];
+  WCHAR name[MAX_PATH+2];
+  WCHAR hst[MAX_PATH+8];
 
   if (local.version != PVERX)
   {
-    printf( "This CMDread is version %x.%.2x, but installed edit DLL is ",
-	    PVERX >> 8, PVERX & 0xFF );
+    wprintf( L"This CMDread is version %x.%.2x, but installed edit DLL is ",
+	     PVERX >> 8, PVERX & 0xFF );
     if (local.version == 0)
-      puts( "unknown." );
+      _putws( L"unknown." );
     else
-      printf( "%x.%.2x.\n", local.version >> 8, local.version & 0xFF );
+      wprintf( L"%x.%.2x.\n", local.version >> 8, local.version & 0xFF );
     return;
   }
 
   if (option.histsize)
-    itoa( option.histsize, buf, 10 );
+    _itow( option.histsize, buf, 10 );
   else
-    strcpy( buf, "all" );
+    wcscpy( buf, L"all" );
 
   if (*local.hstname)
-    sprintf( hst, "\"%s\"", local.hstname );
+    _snwprintf( hst, lenof(hst), L"\"%s\"", local.hstname );
   else
-    strcpy( hst, "none" );
+    wcscpy( hst, L"none" );
 
   if (*cfgname)
-    sprintf( name, "\"%s\"", cfgname );
+    _snwprintf( name, lenof(name), L"\"%s\"", cfgname );
   else
-    strcpy( name, "none" );
+    wcscpy( name, L"none" );
 
-  printf( "\n"
-	  "* %s mode is default.\n"
-	  "* Cursor sizes: insert = %d%%, overwrite = %d%%.\n"
-	  "* Backslash appending is %sabled.\n"
-	  "* History search %s.\n"
-	  "* Auto-recall is %sabled.\n"
-	  "* Translation is %sabled.\n"
-	  "* Error bell is %sabled.\n"
-	  "* Ignore character is '%c'.\n"
-	  "* Minimum history line length is %d.\n"
-	  "* History will remember %s lines.\n"
-	  "* History file: %s.\n"
-	  "* Configuration file: %s.\n"
-	  "* CMDread is %sabled.\n",
-	  (option.overwrite) ? "Overwrite" : "Insert",
-	  option.cursor_size[0], option.cursor_size[1],
-	  (option.no_slash) ? "dis" : "en",
-	  (option.empty_hist)? "moves cursor to end" : "doesn't move cursor",
-	  (option.auto_recall) ? "en" : "dis",
-	  (option.disable_macro) ? "dis" : "en",
-	  (option.silent) ? "dis" : "en",
-	  option.ignore_char,
-	  option.min_length,
-	  buf,
-	  hst,
-	  name,
-	  (local.enabled) ? "en" : "dis"
-	);
+  wprintf( L"* %s mode is default.\n"
+	   L"* Cursor sizes: insert = %d%%, overwrite = %d%%.\n"
+	   L"* Backslash appending is %sabled.\n"
+	   L"* History search %s.\n"
+	   L"* Auto-recall is %sabled.\n"
+	   L"* Translation is %sabled.\n"
+	   L"* Error bell is %sabled.\n"
+	   L"* Underscore is%s part of a word.\n"
+	   L"* Ignore character is '%c'.\n"
+	   L"* Update character is '%c'.\n"
+	   L"* Minimum history line length is %d.\n"
+	   L"* History will remember %s lines.\n"
+	   L"* History file: %s.\n"
+	   L"* Configuration file: %s.\n"
+	   L"* CMDread is %sabled.\n",
+	   (option.overwrite) ? L"Overwrite" : L"Insert",
+	   option.cursor_size[0], option.cursor_size[1],
+	   (option.no_slash) ? L"dis" : L"en",
+	   (option.empty_hist)? L"moves cursor to end" : L"doesn't move cursor",
+	   (option.auto_recall) ? L"en" : L"dis",
+	   (option.disable_macro) ? L"dis" : L"en",
+	   (option.silent) ? L"dis" : L"en",
+	   (option.underscore) ? L"" : L" not",
+	   option.ignore_char,
+	   option.update_char,
+	   option.min_length,
+	   buf,
+	   hst,
+	   name,
+	   (local.enabled) ? L"en" : L"dis"
+	 );
+}
+
+
+// Create or open registry key "root\subkey", checking that it succeeded.
+BOOL GetRegKey( LPCWSTR op, HKEY root, LPCWSTR subkey, PHKEY key, LPDWORD disp )
+{
+  if (ERROR_SUCCESS != RegCreateKeyEx( root, subkey, 0, NULL, 0,
+				       KEY_ALL_ACCESS, NULL, key, disp ))
+  {
+    wprintf( L"CMDread: could not %s", op );
+    if (root == HKEY_LOCAL_MACHINE)
+      wprintf( L" (perhaps use -i/-u, or run as admin)" );
+    _putws( L"." );
+    return FALSE;
+  }
+  return TRUE;
 }
 
 
@@ -556,20 +609,20 @@ DWORD GetParentProcessId( void )
   hSnap = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
   if (hSnap == INVALID_HANDLE_VALUE)
   {
-    puts( "CMDread: unable to obtain process snapshot." );
+    _putws( L"CMDread: unable to obtain process snapshot." );
     exit( 1 );
   }
 
   if (!find_proc_id( hSnap, GetCurrentProcessId(), &pe, &ppe ))
   {
-    puts( "CMDread: could not find my process ID." );
+    _putws( L"CMDread: could not find my process ID." );
     exit( 1 );
   }
   if (ppe.th32ProcessID == pe.th32ParentProcessID)
     pe = ppe;
   else if (!find_proc_id( hSnap, pe.th32ParentProcessID, &pe, &ppe ))
   {
-    puts( "CMDread: could not find my parent's process ID." );
+    _putws( L"CMDread: could not find my parent's process ID." );
     exit( 1 );
   }
   parent_pid = pe.th32ParentProcessID;
@@ -577,13 +630,13 @@ DWORD GetParentProcessId( void )
   CloseHandle( hSnap );
 
   fnIsWow64Process = (LPFN_ISWOW64PROCESS)GetProcAddress(
-			 GetModuleHandle( "kernel32.dll" ), "IsWow64Process" );
+			GetModuleHandle( L"kernel32.dll" ), "IsWow64Process" );
   if (fnIsWow64Process != NULL)
   {
     ph = OpenProcess( PROCESS_QUERY_INFORMATION, FALSE, pe.th32ProcessID );
     if (ph == NULL)
     {
-      puts( "CMDread: could not open parent process." );
+      _putws( L"CMDread: could not open parent process." );
       exit( 1 );
     }
     fnIsWow64Process( ph, &parent_wow64 );
@@ -592,8 +645,8 @@ DWORD GetParentProcessId( void )
 
     if (parent_wow64 != me_wow64)
     {
-      printf( "CMDread: Cannot use %d-bit CMDread with %d-bit CMD.EXE.\n",
-	      (me_wow64) ? 32 : 64, (parent_wow64) ? 32 : 64 );
+      wprintf( L"CMDread: Cannot use %d-bit CMDread with %d-bit CMD.EXE.\n",
+	       (me_wow64) ? 32 : 64, (parent_wow64) ? 32 : 64 );
       exit( 1 );
     }
   }
@@ -605,9 +658,9 @@ DWORD GetParentProcessId( void )
 // Determine if CMDread is already installed in the parent.
 BOOL IsInstalled( DWORD id, PBYTE* base )
 {
-  HANDLE	hModuleSnap;
+  HANDLE hModuleSnap;
   MODULEENTRY32 me;
-  BOOL		fOk;
+  BOOL	 fOk;
 
   *base = NULL;
 
@@ -616,7 +669,7 @@ BOOL IsInstalled( DWORD id, PBYTE* base )
 
   if (hModuleSnap == INVALID_HANDLE_VALUE)
   {
-    puts( "CMDread: unable to obtain module snapshot." );
+    _putws( L"CMDread: unable to obtain module snapshot." );
     return FALSE;
   }
 
@@ -627,7 +680,7 @@ BOOL IsInstalled( DWORD id, PBYTE* base )
   for (fOk = Module32First( hModuleSnap, &me ); fOk;
        fOk = Module32Next( hModuleSnap, &me ))
   {
-    if (stricmp( me.szModule, EDITDLL ) == 0)
+    if (_wcsicmp( me.szModule, EDITDLL ) == 0)
     {
       *base = me.modBaseAddr;
       break;
@@ -658,6 +711,7 @@ void GetStatus( DWORD id, PBYTE base )
     // Locate the "local" export.
 #define MakeVA( cast, base, addValue ) \
   (cast)((DWORD_PTR)(base) + (DWORD_PTR)(addValue))
+
     ReadProcessMemory( parent, base, buf, sizeof(buf), NULL );
     pDosHeader = (PIMAGE_DOS_HEADER)buf;
     pNTHeader = MakeVA( PIMAGE_NT_HEADERS, pDosHeader, pDosHeader->e_lfanew );
@@ -667,7 +721,7 @@ void GetStatus( DWORD id, PBYTE base )
 			   VirtualAddress );
 
     // Bail out if the RVA of the exports section is 0 (it doesn't exist).
-    // This should only happen if there's another edit.dll injected before us.
+    // This should only happen if there's another edit DLL injected before us.
     if ((PBYTE)pExportDir == base)
     {
       CloseHandle( parent );
@@ -685,9 +739,9 @@ void GetStatus( DWORD id, PBYTE base )
       {
 	WORD* ExportOrdinalTable = MakeVA( WORD*, ExportBase,
 					   pExportDir->AddressOfNameOrdinals );
-	ord = ExportOrdinalTable[ord];
 	DWORD* ExportFunctionTable = MakeVA( DWORD*, ExportBase,
 					     pExportDir->AddressOfFunctions );
+	ord = ExportOrdinalTable[ord];
 	plocal = MakeVA( Status*, base, ExportFunctionTable[ord] );
 	break;
       }
@@ -721,15 +775,15 @@ void Inject( HANDLE hProcess )
   LPVOID LLW;
   HANDLE thread;
 
-  len = GetModuleFileNameW( NULL, dll, MAX_PATH ) + 1;
+  len = GetModuleFileName( NULL, dll, lenof(dll) ) + 1;
   for (name = path = dll; *path; ++path)
     if (*path == '\\')
       name = path + 1;
-  wcscpy( name, EDITDLLW );
+  wcscpy( name, EDITDLL );
 
-  LLW = GetProcAddress( GetModuleHandle( "kernel32.dll" ), "LoadLibraryW" );
+  LLW = GetProcAddress( GetModuleHandle( L"kernel32.dll" ), "LoadLibraryW" );
   mem = VirtualAllocEx( hProcess, NULL, len, MEM_COMMIT, PAGE_READWRITE );
-  WriteProcessMemory( hProcess, mem, dll, len * sizeof(WCHAR), NULL );
+  WriteProcessMemory( hProcess, mem, dll, WSZ(len), NULL );
   thread = CreateRemoteThread( hProcess, NULL, 4096, LLW, mem, 0, NULL );
   WaitForSingleObject( thread, INFINITE );
   CloseHandle( thread );
@@ -739,57 +793,58 @@ void Inject( HANDLE hProcess )
 
 void help( void )
 {
-  puts(
-  "CMDread by Jason Hood <jadoxa@yahoo.com.au>.\n"
-  "Version " PVERS " (" PDATE ").  Freeware.\n"
-  "http://cmdkey.adoxa.vze.com/\n"
-  "\n"
+  _putws(
+  L"CMDread by Jason Hood <jadoxa@yahoo.com.au>.\n"
+  L"Version " PVERS L" (" PDATE L").  Freeware.\n"
+  L"http://cmdkey.adoxa.vze.com/\n"
+  L"\n"
 #ifdef _WIN64
-  "Provide enhanced command line editing for CMD.EXE (64-bit).\n"
+  L"Provide enhanced command line editing for CMD.EXE (64-bit).\n"
 #else
-  "Provide enhanced command line editing for CMD.EXE (32-bit).\n"
+  L"Provide enhanced command line editing for CMD.EXE (32-bit).\n"
 #endif
-  "\n"
-  "CMDread [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR]\n"
-  "       [-kcCMD] [-kmSEL] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
-  "       [-f[HISTFILE]] [CFGFILE] [-iu]\n"
-  "\n"
-  "    -b\t\tdisable backslash appending for completed directories\n"
-  "    -c\t\tswap insert and overwrite cursors, or set their size\n"
-  "    -e\t\tsearching history will move cursor to the end\n"
-  "    -f\t\tfile to store persistent history (none means don't store)\n"
-  "    -g\t\tsilent mode\n"
-  "    -h\t\tremember the last HIST commands (0 will remember everything)\n"
-  "    -k\t\tdisable colouring\n"
-  "    -l\t\tminimum line length to remember\n"
-  "    -o\t\tdefault overwrite mode\n"
-  "    -p\t\tuse CHAR to disable translation for the current line\n"
-  "    -r\t\tdefault auto-recall mode\n"
-  "    -t\t\tdisable translation\n"
-  "    -z\t\tdisable CMDread\n"
-  "    -_\t\tunderscore is not part of a word\n"
-  "    CFGFILE\tfile containing CMDread commands and/or history lines\n"
-  "\n"
-  "    CMD\t\tcolour of the command line\n"
-  "    SEL\t\tcolour of selected text\n"
-  "    REC\t\tcolour when recording a macro\n"
-  "    DRV\t\tcolour of the prompt's drive letter and colon\n"
-  "    SEP\t\tcolour of the prompt's directory separator\n"
-  "    DIR\t\tcolour of the prompt's directory\n"
-  "    BASE\tcolour of the prompt's base directory\n"
-  "    GT\t\tcolour of the prompt's greater-than sign\n"
-  "\n"
-  "    -i\t\tinstall (add to CMD's AutoRun registry entry and make the\n"
-  "      \t\tcurrent options the default)\n"
-  "    -u\t\tuninstall (remove from AutoRun)\n"
-  "    -I -U\tuse local machine instead of current user\n"
-  "\n"
-  "CMDread with no arguments will either install itself into the current CMD.EXE\n"
-  "or display the status of the already running instance.  When CMDread is already\n"
-  "running, options -begkort_ will toggle the current state; prefix them with '+'\n"
-  "to explicitly turn on (set behaviour indicated above) or with '-' to turn off\n"
-  "(set default behaviour).  Eg: \"CMDread -+b-g\" will disable backslash appending\n"
-  "and enable the beep, irrespective of the current state.\n"
-  "A colour is one or two hex digits; see CMD's COLOR help."
+  L"\n"
+  L"CMDread [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR] [-qCHAR]\n"
+  L"        [-kcCMD] [-kmSEL] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
+  L"        [-f[HISTFILE]] [CFGFILE] [-iu]\n"
+  L"\n"
+  L"    -b\t\tdisable backslash appending for completed directories\n"
+  L"    -c\t\tswap insert and overwrite cursors, or set their size\n"
+  L"    -e\t\tsearching history will move cursor to the end\n"
+  L"    -f\t\tfile to store persistent history (none means don't store)\n"
+  L"    -g\t\tsilent mode\n"
+  L"    -h\t\tremember the last HIST commands (0 will remember everything)\n"
+  L"    -k\t\tdisable colouring\n"
+  L"    -l\t\tminimum line length to remember\n"
+  L"    -o\t\tdefault overwrite mode\n"
+  L"    -p\t\tuse CHAR to disable translation for the current line\n"
+  L"    -q\t\tuse CHAR to update the line in the history\n"
+  L"    -r\t\tdefault auto-recall mode\n"
+  L"    -t\t\tdisable translation\n"
+  L"    -z\t\tdisable CMDread\n"
+  L"    -_\t\tunderscore is not part of a word\n"
+  L"    CFGFILE\tfile containing CMDread commands and/or history lines\n"
+  L"\n"
+  L"    CMD\t\tcolour of the command line\n"
+  L"    SEL\t\tcolour of selected text\n"
+  L"    REC\t\tcolour when recording a macro\n"
+  L"    DRV\t\tcolour of the prompt's drive letter and colon\n"
+  L"    SEP\t\tcolour of the prompt's directory separator\n"
+  L"    DIR\t\tcolour of the prompt's directory\n"
+  L"    BASE\tcolour of the prompt's base directory\n"
+  L"    GT\t\tcolour of the prompt's greater-than sign\n"
+  L"\n"
+  L"    -i\t\tinstall (add to CMD's AutoRun registry entry and make the\n"
+  L"      \t\tcurrent options the default)\n"
+  L"    -u\t\tuninstall (remove from AutoRun)\n"
+  L"    -I -U\tuse local machine instead of current user (if permitted)\n" );
+  _putws( // too big for a single statement?
+  L"CMDread with no arguments will either install itself into the current CMD.EXE\n"
+  L"or display the status of the already running instance.  When CMDread is already\n"
+  L"running, options -begkort_ will toggle the current state; prefix them with '+'\n"
+  L"to explicitly turn on (set behaviour indicated above) or with '-' to turn off\n"
+  L"(set default behaviour).  Eg: \"CMDread -+b-g\" will disable backslash appending\n"
+  L"and enable the beep, irrespective of the current state.\n"
+  L"A colour is one or two hex digits; see CMD's COLOR help."
       );
 }

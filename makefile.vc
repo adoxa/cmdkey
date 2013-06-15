@@ -1,0 +1,72 @@
+# VC makefile for CMDread.
+# Jason Hood, 6 June, 2013.
+#
+# Tested with:
+# * Visual Studio 6.0 (VC6);
+# * Visual C++ 2003 Toolkit (VC7);
+# * Platform SDK for Windows Server 2003 R2 (VC8 64-bit);
+# * Visual Studio 2008 Express SP1 (VC9);
+# * Visual Studio 2010 Professional (VC10).
+
+!IF "$(CPU)" == "AMD64" || "$(PLATFORM)" == "x64"
+ARCH = amd64
+EARCH = _$(ARCH)
+BASE = 0xCE000000
+RFLAGS = /D_WIN64
+!ELSE
+ARCH = x86
+EARCH =
+BASE = 0xCE00000
+!ENDIF
+
+# This is required for the 2003 Platform SDK, but not for Visual Studio 2010.
+!IF "$(_NMAKE_VER)" == "7.00.8882"
+!IF "$(ARCH)" == "amd64"
+EXTRA_LIBS = bufferoverflowu.lib
+# The 2003 Toolkit doesn't have MSVCRT.LIB, but VC98 does.
+!ELSEIF !DEFINED(SHARE) && !DEFINED(MSVCDIR)
+SHARE =
+!ENDIF
+!ENDIF
+
+# Link with MSVCRT.LIB by default.
+!IF !DEFINED(SHARE)
+SHARE = /MD
+!ENDIF
+
+# Manifest tool to embed the manifest required by 2008.
+MT = mt.exe
+
+CFLAGS = /nologo /W3 /O2 $(SHARE) /D_CRT_SECURE_NO_WARNINGS
+LIBS = advapi32.lib comdlg32.lib shell32.lib user32.lib $(EXTRA_LIBS)
+
+all: edit$(EARCH).dll CMDread_$(ARCH).exe
+
+edit$(EARCH).dll: edit$(EARCH).obj edit$(EARCH).res
+	$(CC) /nologo $(SHARE) /LD /Fe$@ $** $(LIBS) /link /base:$(BASE) /section:.share,s /filealign:512
+!IF "$(_NMAKE_VER)" == "9.00.30729.01"
+	$(MT) /nologo -manifest $@.manifest -outputresource:$@;2
+	del $@.manifest
+!ENDIF
+
+CMDread_$(ARCH).exe: CMDread_$(ARCH).obj CMDread_$(ARCH).res edit$(EARCH).lib
+	$(CC) /nologo $(SHARE) /Fe$@ $** $(LIBS) /link /filealign:512
+!IF "$(_NMAKE_VER)" == "9.00.30729.01"
+	$(MT) /nologo -manifest $@.manifest -outputresource:$@;1
+	del $@.manifest
+!ENDIF
+
+edit$(EARCH).obj: edit.c CMDread.h version.h
+       $(CC) $(CFLAGS) /c /Fo$@ edit.c
+
+CMDread_$(ARCH).obj: CMDread.c CMDread.h version.h
+       $(CC) $(CFLAGS) /c /Fo$@ CMDread.c
+
+edit$(EARCH).res: edit.rc version.h
+       $(RC) $(RFLAGS) /fo$@ edit.rc
+
+CMDread_$(ARCH).res: CMDread.rc version.h
+       $(RC) $(RFLAGS) /fo$@ CMDread.rc
+
+clean:
+	-del *.obj *.res *.lib *.exp

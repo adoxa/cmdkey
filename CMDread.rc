@@ -26,12 +26,12 @@ FILETYPE	VFT_APP
       VALUE "Comments",         "http://cmdkey.adoxa.vze.com/"
       VALUE "CompanyName",      "Jason Hood"
       VALUE "FileDescription",  "Command Line Editor"
-      VALUE "FileVersion",      PVERS
+      VALUE "FileVersion",      PVERSA
       VALUE "InternalName",     "CMDread"
       VALUE "LegalCopyright",   "Freeware"
       VALUE "OriginalFilename", CMDREADEXE
       VALUE "ProductName",      "CMDread"
-      VALUE "ProductVersion",   PVERS
+      VALUE "ProductVersion",   PVERSA
     }
   }
 
@@ -40,3 +40,21 @@ FILETYPE	VFT_APP
     VALUE "Translation", 0x0409, 0x04B0
   }
 }
+
+// Add a manifest for the 32-bit version, to prevent registry redirection when
+// trying to use HKLM.
+#ifndef _WIN64
+1 24
+{
+"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>\
+<assembly xmlns=""urn:schemas-microsoft-com:asm.v1"" manifestVersion=""1.0"">\
+<trustInfo xmlns=""urn:schemas-microsoft-com:asm.v3"">\
+  <security>\
+    <requestedPrivileges>\
+      <requestedExecutionLevel level=""asInvoker"" uiAccess=""false"" />\
+    </requestedPrivileges>\
+  </security>\
+</trustInfo>\
+</assembly>"
+}
+#endif

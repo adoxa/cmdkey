@@ -1,0 +1,78 @@
+# MinGW/MinGW-w64 makefile for CMDread.
+#
+# Tested with:
+# * MinGW/gcc 4.7.2;
+# * tdm-gcc-4.7.1-2;
+# * tdm64-gcc-4.7.1-3;
+# * MinGW-builds x64-4.8.1-release-posix-seh-rev1.
+
+CC = gcc
+CFLAGS = -Wall -O2
+
+#ARCH = 32
+#ARCH = 64
+#ARCH = multi
+
+ifndef ARCH
+# Use the machine to distinguish between MinGW and MinGW-w64.
+ifeq (,$(findstring 64,$(shell gcc -dumpmachine)))
+ARCH = 32
+else
+# It's 64-bit, if it's multi the lib name will be different.
+ifeq ($(shell gcc -m32 -print-libgcc-file-name),$(shell gcc -m64 -print-libgcc-file-name))
+ARCH = 64
+else
+ARCH = multi
+endif
+# MinGW-w64 wants this to enable wmain.
+CFLAGS += -municode
+LDFLAGS = -municode
+endif
+endif
+
+ifeq ($(ARCH),multi)
+all: CMDread32 CMDread64
+else
+all: CMDread$(ARCH)
+endif
+
+CMDread32: edit.dll	  CMDread_x86.exe
+
+CMDread64: edit_amd64.dll CMDread_amd64.exe
+
+
+%.o %_x86.o: %.c
+	$(CC) -m32 -c $(CFLAGS) $< -o $@
+
+%v.o %v_x86.o: %.rc
+	windres -U _WIN64 -F pe-i386 $< $@
+
+%_amd64.o: %.c
+	$(CC) -m64 -c $(CFLAGS) $< -o $@
+
+%v_amd64.o: %.rc
+	windres -F pe-x86-64 $< $@
+
+
+edit.dll: edit.o editv.o
+	$(CC) -m32 $+ -mdll -s -o $@ -lcomdlg32 -Wl,-shared,--out-implib,$(basename $@).a,--image-base,0xCE00000
+
+CMDread_x86.exe: CMDread_x86.o CMDreadv_x86.o edit.a
+	$(CC) -m32 $(LDFLAGS) $+ -s -o $@
+
+edit_amd64.dll: edit_amd64.o editv_amd64.o
+	$(CC) -m64 $+ -mdll -s -o $@ -lcomdlg32 -Wl,-shared,--out-implib,$(basename $@).a,--image-base,0xCE000000
+
+CMDread_amd64.exe: CMDread_amd64.o CMDreadv_amd64.o edit_amd64.a
+	$(CC) $(LDFLAGS) -m64 $+ -s -o $@
+
+
+edit.o	       edit_amd64.o:	 edit.c     CMDread.h version.h
+CMDread_x86.o  CMDread_amd64.o:  CMDread.c  CMDread.h version.h
+
+editv.o        editv_amd64.o:	 edit.rc    version.h
+CMDreadv_x86.o CMDreadv_amd64.o: CMDread.rc version.h
+
+
+clean:
+	-cmd /c "del *.o *.a 2>nul"
