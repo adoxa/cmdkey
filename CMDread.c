@@ -45,14 +45,15 @@
   * renamed from CMDkey to CMDread to avoid potential confusion/conflict with
     Microsoft's Cmdkey.
 
-  v2.10, 11 to 15 June, 2013:
+  v2.10, 11 to 21 June, 2013:
   * use Unicode;
   + -q option to set prefix character to always update the history line;
   - verify the registry key is created (HKLM requires admin privileges);
-  * remove the initial blank line in the stats, add underscore setting.
+  * remove the initial blank line in the stats, add underscore setting, add
+    processor type.
 */
 
-#define PDATE L"15 June, 2013"
+#define PDATE L"21 June, 2013"
 
 #include "CMDread.h"
 #include "version.h"
@@ -543,7 +544,7 @@ void status( void )
 	   L"* History will remember %s lines.\n"
 	   L"* History file: %s.\n"
 	   L"* Configuration file: %s.\n"
-	   L"* CMDread is %sabled.\n",
+	   L"* CMDread (" ARCH L") is %sabled.\n",
 	   (option.overwrite) ? L"Overwrite" : L"Insert",
 	   option.cursor_size[0], option.cursor_size[1],
 	   (option.no_slash) ? L"dis" : L"en",

@@ -33,7 +33,7 @@ Usage
 Upgrading
 ---------
 
-    Run "CMDread -i" to reflect the new name.
+    Run "CMDread -i" (and/or "CMDread -I" as admin) to reflect the new name.
     Delete "cmdkey.*" except for "cmdkey.{cfg,hst}".
 
 Options
@@ -257,9 +257,14 @@ Keys
     will cause CMDread to ignore Ctrl+A.
 
 	DEFK ^A =cls
-	DEFK ^A Erase "cls" Enter
+	DEFK ^A Erase "cls" Execute
 
     will cause CMDread to replace the current line with "cls" and enter it.
+
+	DEFK @Up -cd ..
+	DEFK @Up Erase "cd .." HiddenEx
+
+    will use Alt+Up to move to the parent directory, staying on the same line.
 
     DELK - Delete key(s)
 
@@ -308,6 +313,8 @@ Functions
     FindBack	   #^R ^Up     incrementally search the history backwards
     FindForw	   #^V ^Down   incrementally search the history forwards
     FirstLine	   PgUp        recall first command in history
+    Hidden	   #^Enter     accept line, remove it & prompt from the screen
+    HiddenEx	   #^^	       as above, without adding it to the history
     Ignore		       totally ignore the key
     InsOvr	   Ins	       insert/overwrite toggle
     LastLine	   PgDn        recall last command in history
@@ -735,24 +742,12 @@ Macros
 Known Problems
 ==============
 
-    If you have scrolled the window to move the current line to the bottom,
-    recalling a command that extends to the next line will not scroll the
-    window to make the entire command visible.
-
-    CMD.EXE's internal environment variables will not be expanded.  This may
-    cause problems with your own symbols.  For example, I sometimes add the
-    current directory to the path:
-
-	path %CD%;%path%
-
-    but I also have ";" defined as a symbol, so it leaves "%CD", expands "%;%"
-    and leaves "path%".  A solution is to escape the semicolon:
-
-	path %CD%^;%path%
-
     Redirecting internal commands will use the current code page, but if a
     character cannot be converted, it will not be written (rather than becoming
     a question mark).
+
+    A hidden command that has no output will add a blank line if the previous
+    line is not blank (assuming that to be its output).
 
 
 History
@@ -760,13 +755,18 @@ History
 
     Legend: + added, - bug-fixed, * changed.
 
-    v2.10, 15 June, 2013:
+    v2.10, 21 June, 2013:
     * renamed from CMDkey to CMDread (Microsoft already has a Cmdkey);
     - fixed file name completion testing for directory on an empty name;
     - fixed exe/dll version conflicts (improved future-proofing);
     - fixed redefining a keyboard macro;
-    - fixed interpretation of the config file custom history file;
+    - fixed listing a single-character keyboard macro;
+    - remove extra line(s) when wiping a wrapped command;
+    - fixed interpretation of the custom history file in the config file;
     - test if -I/-U fails and show message (need admin rights);
+    - maintain position when user scrolls window;
+    - fixed handling of environment variables;
+    * expand %CD%;
     * improved (un)install;
     * copy history from primary instance if there's no parent;
     * improved file name completion list;
@@ -774,7 +774,8 @@ History
     + 64-bit version;
     + Windows 8 support;
     + DBCS double-width character support;
-    + use a prefix character to update history.
+    + use a prefix character to update history;
+    + new functions Hidden & HiddenEx to wipe the prompt, as well.
 
     v2.01, 8 December, 2011:
     * fully work with ANSICON.
@@ -840,4 +841,4 @@ History
 
 
 ==========================
-Jason Hood, 15 June, 2013.
+Jason Hood, 21 June, 2013.

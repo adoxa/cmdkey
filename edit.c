@@ -64,7 +64,7 @@
   21 May, 2013:
   - fix file name completion testing for directory on an empty name.
 
-  v2.10, 28 May to 15 June, 2013:
+  v2.10, 28 May to 21 June, 2013:
   * set locale code page and use wprintf for slightly better output;
   + DBCS (double-width characters) support;
   + Windows 8 support (use API-MS-Win-Core-Console-* import library);
@@ -74,7 +74,16 @@
   - fixed bug with internal command redirection when redirection wasn't used;
   * list completed file names using minimal lines;
   - in testing DBCS double-width wrapping, just realised dispbeg was always 0!
-  - fixed redefining a keyboard macro.
+  - fixed redefining a keyboard macro;
+  - fixed listing a single-character keyboard macro;
+  + new functions Hidden & HiddenEx to wipe the command and prompt, and remove
+    it from history; defk '-' prefix for HiddenEx shorthand;
+  * make use of the other buffer to determine the size of the prompt;
+  - fixed wiping a wrapped command;
+  - fixed user scrolling issues;
+  - fixed mixing environment variables with symbols;
+  + expand %CD% and recognise the other CMD.EXE dynamic variables;
+  - recognise, but don't expand, environment variable substitution.
 */
 
 #include "CMDread.h"
@@ -186,17 +195,21 @@ typedef struct
 } Key, *PKey;
 
 
+// Type of keyboard macro.
+enum { MAC_FUNC, MAC_LINE, MAC_HIDDEN };
+
 // Structure for keyboard macros.
 typedef struct macro_s
 {
   struct macro_s* next;
   char*  key;			// pointer into appropriate key array
-  int	 len;
+  int	 type;
+  DWORD  len;
   union
   {
-    PWSTR line; 		// for len <= 0
-    PKey  func; 		// for len > 0
-    Key   chfn; 		// for abs(len) == 1
+    PWSTR line; 		// for type == MAC_LINE or MAC_HIDDEN
+    PKey  func; 		// for type == MAC_FUNC
+    Key   chfn; 		// for len == 1
   };
 } Macro, *PMacro;
 
@@ -280,8 +293,7 @@ WORD	p_attr[MAX_PATH+2];	// buffer to store prompt's attributes
 DWORD	p_attr_len;		// length of above
 BOOL	show_prompt;		// should we redisplay the prompt?
 int	erase_prompt;		// remove the prompt for a multi-cmd?
-DWORD	erase_len;		// how much to remove
-COORD	erase_coord;		// where the prompt starts
+BOOL	hidden_cmd;		// prevent writing newline for Hidden/HiddenEx
 
 Line	line;			// line being edited
 DWORD	max;			// maximum size of above
@@ -327,6 +339,20 @@ Line	envvar; 		// buffer for environment variable
 
 #define VAR_ESCAPE	L"%^"                   // escaped variable characters
 #define ARG_ESCAPE	L"%*^"                  // escaped argument characters
+
+// CMD.EXE dynamic variables - these are recognised, but not expanded (except
+// for %CD%).
+const LPCWSTR cmd_vars[] =
+{
+//L"CD",        // handled separately
+  L"DATE",
+  L"TIME",
+  L"RANDOM",
+  L"ERRORLEVEL",
+  L"CMDEXTVERSION",
+  L"CMDCMDLINE",
+  L"HIGHESTNUMANODENUMBER",
+};
 
 
 // Map control characters using the CP437 glyphs as Unicode codepoints.
@@ -419,7 +445,9 @@ enum
   VarSubst,		// inline var. substitution/brace expansion/association
   Enter,		// accept line
   Execute,		// execute the line without adding it to the history
-  Wipe, 		// execute the line but don't put it in the history
+  Wipe, 		// execute the line without history & remove its display
+  Hidden,		// execute the line & remove it and the prompt
+  HiddenEx,		// as above and don't add to history
   InsOvr,		// insert/overwrite toggle
   Play, 		// play back a series of keys
   Record,		// record a series of keys
@@ -435,22 +463,22 @@ enum
 // Function names for lstk.
 const LPCWSTR func_str[] =
 {
-  L"Default",      L"Ignore",     L"Quote",        L"CharLeft",
-  L"CharRight",    L"WordLeft",   L"WordRight",    L"EndWordLeft",
-  L"EndWordRight", L"StringLeft", L"StringRight",  L"BegLine",
-  L"EndLine",      L"Select",     L"Cut",          L"Paste",
-  L"PrevLine",     L"NextLine",   L"SearchBack",   L"SearchForw",
-  L"FindBack",     L"FindForw",   L"FirstLine",    L"LastLine",
-  L"CopyFromPrev", L"List",       L"ListDir",      L"Cycle",
-  L"CycleBack",    L"CycleDir",   L"CycleDirBack", L"SelectFiles",
-  L"DelLeft",      L"DelRight",   L"DelWordLeft",  L"DelWordRight",
-  L"DelArg",       L"DelBegLine", L"DelEndLine",   L"DelEndExec",
-  L"Erase",        L"StoreErase", L"CmdSep",       L"Transpose",
-  L"SwapWords",    L"SwapArgs",   L"AutoRecall",   L"MacroToggle",
-  L"UnderToggle",  L"VarSubst",   L"Enter",        L"Execute",
-  L"Wipe",         L"InsOvr",     L"Play",         L"Record",
-  L"Undo",         L"Redo",       L"Revert",       L"UpdateEnter",
-  L"UpdateErase"
+  L"Default",      L"Ignore",      L"Quote",        L"CharLeft",
+  L"CharRight",    L"WordLeft",    L"WordRight",    L"EndWordLeft",
+  L"EndWordRight", L"StringLeft",  L"StringRight",  L"BegLine",
+  L"EndLine",      L"Select",      L"Cut",          L"Paste",
+  L"PrevLine",     L"NextLine",    L"SearchBack",   L"SearchForw",
+  L"FindBack",     L"FindForw",    L"FirstLine",    L"LastLine",
+  L"CopyFromPrev", L"List",        L"ListDir",      L"Cycle",
+  L"CycleBack",    L"CycleDir",    L"CycleDirBack", L"SelectFiles",
+  L"DelLeft",      L"DelRight",    L"DelWordLeft",  L"DelWordRight",
+  L"DelArg",       L"DelBegLine",  L"DelEndLine",   L"DelEndExec",
+  L"Erase",        L"StoreErase",  L"CmdSep",       L"Transpose",
+  L"SwapWords",    L"SwapArgs",    L"AutoRecall",   L"MacroToggle",
+  L"UnderToggle",  L"VarSubst",    L"Enter",        L"Execute",
+  L"Wipe",         L"Hidden",      L"HiddenEx",     L"InsOvr",
+  L"Play",         L"Record",      L"Undo",         L"Redo",
+  L"Revert",       L"UpdateEnter", L"UpdateErase"
 };
 
 
@@ -487,6 +515,8 @@ const Cfg cfg[] = {
   f( FindBack	  )
   f( FindForw	  )
   f( FirstLine	  )
+  f( Hidden	  )
+  f( HiddenEx	  )
   f( Ignore	  )
   f( InsOvr	  )
   f( LastLine	  )
@@ -568,7 +598,7 @@ char key_table[][4] = { 	// VK_PRIOR to VK_DELETE
   // plain	shift		control 	shift+control
   { DelLeft,	DelLeft,	DelWordLeft,	DelArg, 	},// Backspace
   { Cycle,	CycleBack,	List,		ListDir,	},// Tab
-  { Enter,	UpdateEnter,	Execute,	Ignore, 	},// Enter
+  { Enter,	UpdateEnter,	Execute,	Hidden, 	},// Enter
   { Erase,	Erase,		Ignore, 	Ignore, 	},// Escape
 
   // plain	shift		control 	alt
@@ -622,9 +652,9 @@ char ctrl_key_table[][2] = {
   { AutoRecall, 	Ignore, 	}, // ^Y
   { Undo,		Redo,		}, // ^Z
   { Erase,		Ignore, 	}, // ^[
-  { CycleDir,		CycleDirBack,	}, // ^\  (don't end with a backslash)
+  { CycleDir,		CycleDirBack,	}, // ^\  (can't end line w/ backslash)
   { CmdSep,		Ignore, 	}, // ^]
-  { Wipe,		Ignore, 	}, // ^^
+  { Wipe,		HiddenEx,	}, // ^^
   { MacroToggle,	UnderToggle,	}, // ^_
 };
 
@@ -755,7 +785,7 @@ char* get_key( PKey );			// read a key
 WCHAR process_keypad( WORD );		// translate Alt+Keypad to character
 void  edit_line( void );		// read and edit line from the keyboard
 void  display_prompt( void );		// re-display the original prompt
-void  remove_prompt( void );		// wipe out the prompt
+void  remove_prompt( DWORD );		// wipe out the prompt
 
 
 // Undo
@@ -1417,6 +1447,7 @@ void edit_line( void )
   int	 start1, cnt1;
   DWORD  markpos = ~0, markbeg = 0, markend = 0; // the selection positions
   BOOL	 keep_mark;
+  DWORD  hlen;				// length of old command to hide
 
   GetConsoleScreenBufferInfo( hConOut, &screen );
   if (show_prompt)
@@ -1455,7 +1486,7 @@ void edit_line( void )
       key = get_key( &chfn );
 
     dispbeg = ~0;			// nothing to display
-    dispend = cellend = 0;
+    dispend = cellend = hlen = 0;
     compl >>= 1;			// update state of completion
     name  >>= 1;
     empty >>= 1;			// update state of "empty" search
@@ -1740,13 +1771,21 @@ void edit_line( void )
 	done = TRUE;
       break;
 
+      case Hidden:
+	if (line.len != 0 && *line.txt == option.update_char &&
+	    hist != &history)
+	  remove_from_history( hist );
+	add_to_history( TRUE );
+
+      case HiddenEx:
+	hidden_cmd = TRUE;
+
       case Wipe:
       {
 	DWORD len = display_length( line.txt, line.len, line.len );
 	FillConChar( hConOut, ' ', len, screen.dwCursorPosition );
 	if (!option.nocolour)
 	  FillConAttr( hConOut,screen.wAttributes,len,screen.dwCursorPosition );
-	SetConsoleCursorPosition( hConOut, screen.dwCursorPosition );
 	done = TRUE;
       }
       break;
@@ -2089,9 +2128,17 @@ void edit_line( void )
 
       case Play:
 	mac = find_macro( key );
-	if (mac && mac->len <= 0)
+	if (mac && mac->type != MAC_FUNC)
 	{
-	  copy_chars( (mac->len == -1) ? &mac->chfn.ch : mac->line, -mac->len );
+	  // If it's hidden, remove the old line, without displaying the new.
+	  if (mac->type == MAC_HIDDEN)
+	    hlen = display_length( line.txt, line.len, line.len );
+	  copy_chars( (mac->len == 1) ? &mac->chfn.ch : mac->line, mac->len );
+	  if (mac->type == MAC_HIDDEN)
+	  {
+	    hidden_cmd = TRUE;
+	    dispbeg = dispend = 0;
+	  }
 	  done = TRUE;
 	}
       break;
@@ -2296,7 +2343,7 @@ void edit_line( void )
       set_display_marks( markbeg, markend );
     }
     if (dispbeg == ~0)
-      dispbeg = line.len;
+      dispbeg = 0;
 
     cnt = dispend - dispbeg;
     if (cnt)
@@ -2323,11 +2370,17 @@ void edit_line( void )
 	  screen.dwCursorPosition.Y -= src.Top;
 	  e.Y = screen.dwSize.Y - 1;
 	}
-	else if (e.Y > screen.srWindow.Bottom)
+	else if (e.Y != screen.dwCursorPosition.Y)
 	{
-	  screen.srWindow.Top	 += e.Y - screen.srWindow.Bottom;
-	  screen.srWindow.Bottom += e.Y - screen.srWindow.Bottom;
-	  SetConsoleWindowInfo( hConOut, TRUE, &screen.srWindow );
+	  CONSOLE_SCREEN_BUFFER_INFO csbi;
+	  GetConsoleScreenBufferInfo( hConOut, &csbi );
+	  if (e.Y > csbi.srWindow.Bottom)
+	  {
+	    screen.srWindow = csbi.srWindow;
+	    screen.srWindow.Top    += e.Y - screen.srWindow.Bottom;
+	    screen.srWindow.Bottom += e.Y - screen.srWindow.Bottom;
+	    SetConsoleWindowInfo( hConOut, TRUE, &screen.srWindow );
+	  }
 	}
 
 	c = line_to_scr( dispbeg );
@@ -2398,7 +2451,10 @@ void edit_line( void )
       }
     }
 
-    SetConsoleCursorPosition( hConOut, line_to_scr( (done) ? line.len : pos ) );
+    if (!hidden_cmd)
+      SetConsoleCursorPosition( hConOut,
+				(chfn.fn == Wipe) ? screen.dwCursorPosition
+				: line_to_scr( (done) ? line.len : pos ) );
   }
   undoing = NULL;
 
@@ -2412,9 +2468,15 @@ void edit_line( void )
     imode ^= ENABLE_INSERT_MODE;
   SetConsoleMode( hConIn,  imode );
 
-  if ((display_length( line.txt, line.len, line.len )
-       + screen.dwCursorPosition.X) % screen.dwSize.X)
+  if (hidden_cmd)
+  {
+    remove_prompt( hlen );
+  }
+  else if ((display_length( line.txt, line.len, line.len )
+	    + screen.dwCursorPosition.X) % screen.dwSize.X)
+  {
     WriteCon( hConOut, L"\n", 1 );
+  }
 
   if (line.len != 0 && *line.txt == option.update_char)
     remove_chars( 0, 1 );
@@ -2440,17 +2502,41 @@ void display_prompt( void )
 }
 
 
-// Remove the user's prompt.
-void remove_prompt( void )
+// Remove the user's prompt (and command).
+void remove_prompt( DWORD extra )
 {
   if (erase_prompt == 2)
   {
-    // Blank out the prompt.
+    DWORD erase_len;			// how much to remove
+    COORD erase_coord;			// where the prompt starts
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+
+    if (p_attr_len != 0)
+      erase_len = p_attr_len;
+    else
+    {
+      // Output the prompt on the other buffer to see how long it is.
+      if (dbcs)
+	SetConsoleMode( hConWid, ENABLE_PROCESSED_OUTPUT |
+				 ENABLE_WRAP_AT_EOL_OUTPUT );
+      erase_coord.X = erase_coord.Y = 0;
+      SetConsoleCursorPosition( hConWid, erase_coord );
+      WriteCon( hConWid, prompt.txt, prompt.len );
+      if (dbcs)
+	SetConsoleMode( hConWid, ENABLE_WRAP_AT_EOL_OUTPUT );
+      GetConsoleScreenBufferInfo( hConWid, &csbi );
+      erase_len = csbi.dwCursorPosition.Y * csbi.dwSize.X
+		  + csbi.dwCursorPosition.X;
+    }
+    erase_coord.X = 0;
+    erase_coord.Y = screen.dwCursorPosition.Y - erase_len / screen.dwSize.X;
+    erase_len += extra;
     FillConChar( hConOut, ' ', erase_len, erase_coord );
     FillConAttr( hConOut, screen.wAttributes, erase_len, erase_coord );
 
     // Restore the position prior to writing it.
-    SetConsoleCursorPosition( hConOut, lastc );
+    lastc.Y = erase_coord.Y - 1;
+    SetConsoleCursorPosition( hConOut, (hidden_cmd) ? erase_coord : lastc );
 
     erase_prompt = 0;
   }
@@ -3936,7 +4022,10 @@ void expand_vars( BOOL env )
 {
   Line	  var = { NULL, 0 };
   PDefine d;
-  DWORD   pos, cnt, start;
+  DWORD   pos, cnt, start, end;
+  WCHAR   ch, cd[MAX_PATH];
+  BOOL	  fndenv;
+  int	  j;
 
   start = ~0;
   for (pos = 0; pos < line.len; ++pos)
@@ -3949,17 +4038,44 @@ void expand_vars( BOOL env )
 	start = pos + 1;
       else
       {
-	cnt = pos - start;
-	if (env)
+	// See if there's a substitution.
+	for (end = start; end < pos; ++end)
 	{
-	  line.txt[pos] = '\0';
-	  var.len	= get_env_var( line.txt + start, NULL );
-	  var.txt	= envvar.txt;
-	  line.txt[pos] = VARIABLE;
+	  if (line.txt[end] == ':')
+	    break;
 	}
-	else
-	  var.len = 0;
+	fndenv = TRUE;
+	cnt = end - start;
+	ch = line.txt[end];
+	line.txt[end] = '\0';
+	var.len = get_env_var( line.txt + start, NULL );
+	var.txt = envvar.txt;
 	if (!var.len)
+	{
+	  // Check for a CMD.EXE dynamic variable.
+	  if (cnt == 2 && _wcsicmp( line.txt + start, L"CD" ) == 0)
+	  {
+	    if (env && end == pos)
+	    {
+	      var.len = GetCurrentDirectory( MAX_PATH, cd );
+	      var.txt = cd;
+	    }
+	  }
+	  else
+	  {
+	    fndenv = FALSE;
+	    for (j = 0; j < lenof(cmd_vars); ++j)
+	    {
+	      if (_wcsicmp( line.txt + start, cmd_vars[j] ) == 0)
+	      {
+		fndenv = TRUE;
+		break;
+	      }
+	    }
+	  }
+	}
+	line.txt[end] = ch;
+	if (!fndenv && end == pos)
 	{
 	  d = find_define( &sym_head, start, cnt );
 	  if (d)
@@ -3968,9 +4084,10 @@ void expand_vars( BOOL env )
 	    var.len = d->line->len;
 	  }
 	}
-	if (var.len)
+	if (var.len || fndenv)
 	{
-	  replace_chars( start - 1, cnt + 2, var.txt, var.len );
+	  if (var.len && end == pos)
+	    replace_chars( start - 1, cnt + 2, var.txt, var.len );
 	  start = ~0;
 	}
 	else
@@ -4036,18 +4153,20 @@ void execute_defk( DWORD pos )
     return;
   }
 
-  if (line.txt[pos] == '=')             // a command - replace the line with
-  {					//  the definition and execute it
+  if (line.txt[pos] == '=' ||           // a command - replace the line with
+      line.txt[pos] == '-')             //  the definition and execute it
+  {
     ++pos;
     m = add_macro( key );
     if (!m)
       return;
-    m->len = pos - line.len;
-    if (m->len == -1)
+    m->type = (line.txt[pos-1] == '=') ? MAC_LINE : MAC_HIDDEN;
+    m->len = line.len - pos;
+    if (m->len == 1)
       m->chfn.ch = line.txt[pos];
     else if (m->len != 0)
     {
-      m->line = new_txt( line.txt + pos, -m->len );
+      m->line = new_txt( line.txt + pos, m->len );
       if (!m->line)
       {
 	del_macro( key );
@@ -4721,9 +4840,11 @@ void list_key( char* key )
     return;
   }
 
-  if (m->len <= 0)
+  if (m->type != MAC_FUNC)
   {
-    fwprintf( lstout, L"=%.*s\n", -m->len, m->line );
+    fwprintf( lstout, L"%c%.*s\n",
+	      (m->type == MAC_LINE) ? '=' : '-', m->len,
+	      (m->len == 1) ? &m->chfn.ch : m->line );
     return;
   }
 
@@ -4818,9 +4939,10 @@ PMacro add_macro( char* key )
       macro_head = m;
     }
   }
-  else if (m->len < -1 || m->len > 1)
+  else if (m->len > 1)
     free( m->line );
 
+  m->type = MAC_FUNC;
   m->len  = 0;
   m->line = NULL;
 
@@ -4866,7 +4988,7 @@ void del_macro( char* key )
   m = find_macro( key );
   if (m)
   {
-    if (m->len < -1 || m->len > 1)
+    if (m->len > 1)
       free( m->line );
     if (macro_prev)
       macro_prev->next = m->next;
@@ -5450,7 +5572,7 @@ void show_error( PCWSTR err, DWORD pos, DWORD len )
 {
   if (line_no && !seen_error)
   {
-    remove_prompt();
+    remove_prompt( 0 );
     seen_error = TRUE;
   }
   fputws( L"CMDread: ", stdout );
@@ -5532,6 +5654,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
   COORD c;
   int	j;
   DWORD mode;
+  SMALL_RECT sr;
+  CONSOLE_CURSOR_INFO cci;
 
   if (option.disable_CMDread)
   {
@@ -5561,41 +5685,43 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     check_break = 1;
 
     set_codepage();
+
+    // Create a buffer to determine the size of the prompt and the width of
+    // DBCS double-width strings.
+    hConWid = CreateConsoleScreenBuffer( GENERIC_READ | GENERIC_WRITE, 0, NULL,
+					 CONSOLE_TEXTMODE_BUFFER, NULL );
+    // Turn off processed output.
+    if (dbcs)
+      SetConsoleMode( hConWid, ENABLE_WRAP_AT_EOL_OUTPUT );
+    // Create a buffer the same size as the current one and as many lines as
+    // necessary to handle the double-width characters.
+    c.X = screen.dwSize.X;
+    c.Y = nNumberOfCharsToRead * 2 / c.X + 1;
+    SetConsoleScreenBufferSize( hConWid, c );
+    // Even though the cursor is on a different buffer, it still shows up on
+    // the normal one.
+    cci.dwSize = 1;
+    cci.bVisible = FALSE;
+    SetConsoleCursorInfo( hConWid, &cci );
     if (dbcs)
     {
-      SMALL_RECT sr;
-      CONSOLE_CURSOR_INFO cci;
-
-      // Create two buffers: one for the normal command line, to handle wrap;
-      // and another for file names without wrap.
-      hConWid = CreateConsoleScreenBuffer( GENERIC_READ|GENERIC_WRITE, 0, NULL,
-					   CONSOLE_TEXTMODE_BUFFER, NULL );
+      // Create another buffer to get the length of file names for the list.
       hConWid1 = CreateConsoleScreenBuffer( GENERIC_READ|GENERIC_WRITE, 0, NULL,
 					    CONSOLE_TEXTMODE_BUFFER, NULL );
-      // Turn off processed output.
-      SetConsoleMode( hConWid,	ENABLE_WRAP_AT_EOL_OUTPUT );
       SetConsoleMode( hConWid1, ENABLE_WRAP_AT_EOL_OUTPUT );
-      // Create a single-line window; use maximum width since minimum varies.
+      // Create a single-line window, in order to create a single-line buffer.
       sr.Left = sr.Top = sr.Bottom = 0;
-      sr.Right = screen.dwMaximumWindowSize.X - 1;
-      SetConsoleWindowInfo( hConWid,  TRUE, &sr );
+      sr.Right = screen.srWindow.Right - screen.srWindow.Left;
       SetConsoleWindowInfo( hConWid1, TRUE, &sr );
-      c.X = screen.dwSize.X;
-      c.Y = nNumberOfCharsToRead * 2 / c.X + 1;
-      SetConsoleScreenBufferSize( hConWid, c );
+      // Create a sufficiently long single-line buffer to avoid wrap.
       c.X = nNumberOfCharsToRead * 2;
       c.Y = 1;
       SetConsoleScreenBufferSize( hConWid1, c );
-      // Even though the cursor is on a different buffer, it still shows up on
-      // the normal one.
-      cci.dwSize = 1;
-      cci.bVisible = FALSE;
-      SetConsoleCursorInfo( hConWid,  &cci );
       SetConsoleCursorInfo( hConWid1, &cci );
     }
 
     if (macro_stk || mcmd.txt)
-      remove_prompt();
+      remove_prompt( 0 );
     else
     {
       if (!option.nocolour && prompt.len > 3 &&
@@ -5728,6 +5854,8 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
     *lpNumberOfCharsRead = line.len;
 
     CloseHandle( hConWid );
+    if (dbcs)
+      CloseHandle( hConWid1 );
     prompt.len	= 0;
     trap_break	= FALSE;
     check_break = 0;
@@ -5757,72 +5885,58 @@ WINAPI MyWriteConsoleW( HANDLE hConsoleOutput, CONST VOID* lpBuffer,
 			DWORD nNumberOfCharsToWrite,
 			LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved )
 {
-  BOOL rc;
-  CONSOLE_SCREEN_BUFFER_INFO csbi;
-  #define TESTSIZE 40
-  WCHAR before[TESTSIZE], after[TESTSIZE];
-
-  if ((macro_stk || mcmd.txt || *cmdname) &&
-      nNumberOfCharsToWrite == 2 && memcmp( lpBuffer, L"\r\n", 4 ) == 0)
+  if (nNumberOfCharsToWrite == 2 && memcmp( lpBuffer, L"\r\n", 4 ) == 0)
   {
     // Remember where the previous command finished, so we can restore it.
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
     lastc = csbi.dwCursorPosition;
     erase_prompt = 1;
+
+    if (hidden_cmd)
+    {
+      // For a command with no output, we want to prevent this being written,
+      // so the prompt remains where it is.  However, if there was output, we
+      // still want to separate the output from the new prompt.  If the cursor
+      // is not at the start of the line, it's safe to assume output; otherwise
+      // see if the previous line is blank (no real need to add a second blank).
+      if (lastc.X != 0)
+	hidden_cmd = FALSE;
+      else
+      {
+	WCHAR blank[80];	// the first 80 chars should be enough
+	DWORD sz = min( csbi.dwSize.X, 80 );
+	--csbi.dwCursorPosition.Y;
+	ReadConsoleOutputCharacter( hConsoleOutput, blank, sz,
+				    csbi.dwCursorPosition, &conwr );
+	for (sz = 0; sz < conwr; ++sz)
+	{
+	  if (blank[sz] != ' ')
+	  {
+	    hidden_cmd = FALSE;
+	    break;
+	  }
+	}
+      }
+      if (hidden_cmd)
+      {
+	hidden_cmd = FALSE;
+	if (lpNumberOfCharsWritten)
+	  *lpNumberOfCharsWritten = nNumberOfCharsToWrite;
+	return TRUE;
+      }
+    }
   }
   else
   {
     prompt.txt = (PWSTR)lpBuffer;
     prompt.len = nNumberOfCharsToWrite;
-    if (erase_prompt == 1)
-    {
-      erase_prompt = 2;
-      GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
-      erase_coord = csbi.dwCursorPosition;
-      --erase_coord.Y;
-      ReadConsoleOutputCharacter( hConsoleOutput, before, TESTSIZE,
-				  erase_coord, &conwr );
-    }
+    erase_prompt = 2;
   }
+  hidden_cmd = FALSE;
 
-  rc = WriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
-		      lpNumberOfCharsWritten, lpReserved );
-
-  if (erase_prompt)
-  {
-    // Check for scroll by comparing the coordinate.
-    GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
-    if (erase_prompt == 1)
-    {
-      if (csbi.dwCursorPosition.Y == lastc.Y)
-	--lastc.Y;
-    }
-    else // (erase_prompt == 2)
-    {
-      if (csbi.dwCursorPosition.Y == erase_coord.Y + 1)
-      {
-	// Determine scroll size by comparing screen contents (yuck).
-	int i;
-	for (i = 0; i < 16; ++i)
-	{
-	  ReadConsoleOutputCharacter( hConsoleOutput, after, TESTSIZE,
-				      erase_coord, &conwr );
-	  if (memcmp( before, after, WSZ(conwr) ) == 0)
-	    break;
-	  if (erase_coord.Y == 0)
-	    break;
-	  --lastc.Y;
-	  --erase_coord.Y;
-	}
-      }
-      ++erase_coord.Y;
-      GetConsoleScreenBufferInfo( hConsoleOutput, &csbi );
-      erase_len = csbi.dwCursorPosition.X - lastc.X
-		  + (csbi.dwCursorPosition.Y - lastc.Y) * csbi.dwSize.X;
-    }
-  }
-
-  return rc;
+  return WriteConsoleW( hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
+			lpNumberOfCharsWritten, lpReserved );
 }
 
 
