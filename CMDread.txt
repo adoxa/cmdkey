@@ -91,10 +91,10 @@ Options
 
     The "primary" instance of CMDread will save its history to this file when
     CMD.EXE exits and restore it when next run.  The default is "CMDread.hst"
-    in the same directory as "CMDread.cmd"; if no file is specified, the his-
-    tory will not be saved (i.e. without "-f" it will save to CMDread.hst, with
-    "-f" it will not save history and with "-fFILE" it will save to FILE).  The
-    primary instance is the first one to load, or the next one loaded after the
+    in %USERPROFILE%; if no file is specified, the history will not be saved
+    (i.e. without "-f" it will save to %USERPROFILE%\CMDread.hst; with "-f" it
+    will not save history; and with "-fFILE" it will save to FILE).  The pri-
+    mary instance is the first one to load, or the next one loaded after the
     first one exits.  If you've chosen to remember every line, "only" the last
     1000 will be saved.
 
@@ -194,14 +194,14 @@ Options
     example becomes two words).
 
     Finally, a file name can be given to configure CMDread.  The default name
-    is "CMDread.cfg" in the same directory as "CMDread.cmd".  The file can con-
-    tain anything: lines beginning with a dash ("-") and blank lines are ig-
-    nored (unless they are part of a macro definition); a CMDread internal com-
-    mand will be executed; anything else will be stored in the history.  The
-    format of the commands in the file is the same as if you typed them from
-    the command prompt, except there is no need to escape "^".  Lines may be up
-    to 1024 characters long.  The file is interpreted using the system OEM code
-    page, unless it starts with the UTF-8 byte-order mark.
+    is "CMDread.cfg" in %USERPROFILE%.  The file can contain anything: lines
+    beginning with a dash ("-") and blank lines are ignored (unless they are
+    part of a macro definition); a CMDread internal command will be executed;
+    anything else will be stored in the history.  The format of the commands in
+    the file is the same as if you typed them from the command prompt, except
+    there is no need to escape "^".  Lines may be up to 1024 characters long.
+    The file is interpreted using the system OEM code page, unless it starts
+    with the UTF-8 byte-order mark.
 
     Configuration can be customised according to the initial directory by
     starting a line with "#" followed by the directory (using the full path,
@@ -755,7 +755,7 @@ History
 
     Legend: + added, - bug-fixed, * changed.
 
-    v2.10, 21 June, 2013:
+    v2.10, 24 June, 2013:
     * renamed from CMDkey to CMDread (Microsoft already has a Cmdkey);
     - fixed file name completion testing for directory on an empty name;
     - fixed exe/dll version conflicts (improved future-proofing);
@@ -771,6 +771,7 @@ History
     * copy history from primary instance if there's no parent;
     * improved file name completion list;
     * tweak stats display (remove initial blank line, add underscore setting);
+    * use %USERPROFILE% as default config/history path (not same as binary);
     + 64-bit version;
     + Windows 8 support;
     + DBCS double-width character support;
@@ -841,4 +842,4 @@ History
 
 
 ==========================
-Jason Hood, 21 June, 2013.
+Jason Hood, 24 June, 2013.

@@ -45,15 +45,16 @@
   * renamed from CMDkey to CMDread to avoid potential confusion/conflict with
     Microsoft's Cmdkey.
 
-  v2.10, 11 to 21 June, 2013:
+  v2.10, 11 to 24 June, 2013:
   * use Unicode;
   + -q option to set prefix character to always update the history line;
   - verify the registry key is created (HKLM requires admin privileges);
   * remove the initial blank line in the stats, add underscore setting, add
-    processor type.
+    processor type;
+  * use %USERPROFILE% as the default config/history path.
 */
 
-#define PDATE L"21 June, 2013"
+#define PDATE L"24 June, 2013"
 
 #include "CMDread.h"
 #include "version.h"
@@ -447,14 +448,12 @@ int wmain( int argc, wchar_t* argv[] )
       GetFullPathName( fname, lenof(cfgname), cfgname, NULL );
     else if (installed == -1)
     {
-      j = GetModuleFileName( NULL, cfgname, lenof(cfgname) );
-      // Strip the processor type (too bad if it's been renamed).
-      while (cfgname[--j] != '_' && cfgname[j] != '\\' && j != 0) ;
-      wcscpy( cfgname + j, L".cfg" );
+      j = GetEnvironmentVariable( L"USERPROFILE", cfgname, lenof(cfgname) );
+      wcscpy( cfgname + j, L"\\CMDread.cfg" );
       if (!hstfile)
       {
-	memcpy( hstname, cfgname, WSZ(j) );
-	wcscpy( hstname + j, L".hst" );
+	memcpy( hstname, cfgname, WSZ(j + 9) );
+	wcscpy( hstname + j + 9, L"hst" );
 	hstfile = TRUE;
       }
     }
