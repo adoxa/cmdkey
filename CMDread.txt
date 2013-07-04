@@ -3,7 +3,7 @@
 
 			  Copyright 2006-13 Jason Hood
 
-			    Version 2.10.  Freeware
+			    Version 2.11.  Freeware
 
 
 Description
@@ -199,7 +199,7 @@ Options
     part of a macro definition); a CMDread internal command will be executed;
     anything else will be stored in the history.  The format of the commands in
     the file is the same as if you typed them from the command prompt, except
-    there is no need to escape "^".  Lines may be up to 1024 characters long.
+    there is no need to escape "^".  Lines may be up to 2046 characters long.
     The file is interpreted using the system OEM code page, unless it starts
     with the UTF-8 byte-order mark.
 
@@ -755,6 +755,11 @@ History
 
     Legend: + added, - bug-fixed, * changed.
 
+    v2.11, 4 July, 2013:
+    - fixed storing file names;
+    - prevent crash from an invalid file (but still garbage in, garbage out);
+    * increase maximum line length to 2046 bytes.
+
     v2.10, 24 June, 2013:
     * renamed from CMDkey to CMDread (Microsoft already has a Cmdkey);
     - fixed file name completion testing for directory on an empty name;
@@ -841,5 +846,5 @@ History
     + first release.
 
 
-==========================
-Jason Hood, 24 June, 2013.
+=========================
+Jason Hood, 4 July, 2013.

@@ -84,6 +84,10 @@
   - fixed mixing environment variables with symbols;
   + expand %CD% and recognise the other CMD.EXE dynamic variables;
   - recognise, but don't expand, environment variable substitution.
+
+  v2.11, 4 July, 2013:
+  * increase maximum file line length to 2046 (2048 - LF - NUL);
+  - prevent crash when reading an invalid file.
 */
 
 #include "CMDread.h"
@@ -3436,7 +3440,7 @@ BOOL read_cmdfile( PCWSTR name )
 // ignored.  If skip is TRUE, lines are skipped until the next '#'.
 BOOL get_file_line( BOOL skip )
 {
-  char buf[1024];
+  char buf[2048];
 
   do
   {
@@ -3455,7 +3459,8 @@ BOOL get_file_line( BOOL skip )
       line.len = 0;
       return FALSE;
     }
-  } while (*buf == '\n' || *buf == '-' || (skip && *buf != '#'));
+  } while (*buf == '\n' || *buf == '-' || (skip && *buf != '#')
+	   || *buf == '\0' || buf[1] == '\0');
 
   line.len = MultiByteToWideChar( filecp, 0, buf, -1, NULL, 0 );
   if (!make_line( line.len ))

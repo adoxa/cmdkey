@@ -52,9 +52,12 @@
   * remove the initial blank line in the stats, add underscore setting, add
     processor type;
   * use %USERPROFILE% as the default config/history path.
+
+  v2.11, 4 July, 2013:
+  - fixed file names (GetFullPathNameW doesn't like the same buffers).
 */
 
-#define PDATE L"24 June, 2013"
+#define PDATE L"4 July, 2013"
 
 #include "CMDread.h"
 #include "version.h"
@@ -122,12 +125,11 @@ int wmain( int argc, wchar_t* argv[] )
   char*  opt;
   LPWSTR ops;
   char	 state;
-  LPWSTR fname;
+  LPWSTR fname, hname;
   ULONG  num;
   HKEY	 key, root;
   DWORD  exist;
   WCHAR  CMDread[MAX_PATH+4];
-  BOOL	 hstfile;
   UCHAR* colour = NULL;
   int	 j;
   DWORD  len, type;
@@ -169,9 +171,8 @@ int wmain( int argc, wchar_t* argv[] )
     return 0;
   }
   update = (installed == -1);
-  fname = (active) ? cmdname : cfgname;
+  fname = hname = NULL;
   root = HKEY_CURRENT_USER;
-  hstfile = FALSE;
 
   for (j = 1; j < argc; ++j)
   {
@@ -410,9 +411,8 @@ int wmain( int argc, wchar_t* argv[] )
 	  break;
 
 	  case 'f':
-	    hstfile = TRUE;
+	    hname = arg + 1;
 	    end = wcschr( arg + 1, '\0' );
-	    memcpy( hstname, arg + 1, WSZ(end - arg) );
 	  break;
 
 	  default:
@@ -437,24 +437,24 @@ int wmain( int argc, wchar_t* argv[] )
 	return 1;
       }
       fclose( tmp );
-      wcscpy( fname, argv[j] );
+      fname = argv[j];
     }
   }
   if (update)
   {
-    if (hstfile && *hstname)
-      GetFullPathName( hstname, lenof(hstname), hstname, NULL );
-    if (*fname)
+    if (hname && *hname)
+      GetFullPathName( hname, lenof(hstname), hstname, NULL );
+    if (fname && *fname)
       GetFullPathName( fname, lenof(cfgname), cfgname, NULL );
     else if (installed == -1)
     {
       j = GetEnvironmentVariable( L"USERPROFILE", cfgname, lenof(cfgname) );
       wcscpy( cfgname + j, L"\\CMDread.cfg" );
-      if (!hstfile)
+      if (!hname)
       {
 	memcpy( hstname, cfgname, WSZ(j + 9) );
 	wcscpy( hstname + j + 9, L"hst" );
-	hstfile = TRUE;
+	hname = hstname;
       }
     }
 
@@ -464,19 +464,24 @@ int wmain( int argc, wchar_t* argv[] )
 		   sizeof(option) );
     RegSetValueEx( key, L"Cmdfile", 0, REG_SZ, (LPBYTE)cfgname,
 		   WSZ(wcslen( cfgname ) + 1) );
-    if (hstfile)
+    if (hname)
       RegSetValueEx( key, L"Hstfile", 0, REG_SZ, (LPBYTE)hstname,
 		     WSZ(wcslen( hstname ) + 1) );
     RegCloseKey( key );
   }
-  else if (hstfile)
+  else
   {
-    if (*hstname)
-      GetFullPathName( hstname, lenof(hstname), hstname, NULL );
-    else
+    if (fname)
+      wcscpy( (active) ? cmdname : cfgname, fname );
+    if (hname)
     {
-      *hstname = '-';
-      hstname[1] = '\0';
+      if (*hname)
+	GetFullPathName( hname, lenof(hstname), hstname, NULL );
+      else
+      {
+	*hstname = '-';
+	hstname[1] = '\0';
+      }
     }
   }
 
