@@ -88,6 +88,10 @@
   v2.11, 4 July, 2013:
   * increase maximum file line length to 2046 (2048 - LF - NUL);
   - prevent crash when reading an invalid file.
+
+  v2.12, 10 July, 2013:
+  * read options from CMDread, not here;
+  - fix saving to the history file specified from the command line.
 */
 
 #include "CMDread.h"
@@ -95,10 +99,6 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <ImageHlp.h>
-
-#ifndef offsetof
-# define offsetof(type, member) (size_t)(&(((type*)0)->member))
-#endif
 
 #ifndef ENABLE_INSERT_MODE
 #define ENABLE_INSERT_MODE     0x20
@@ -139,7 +139,6 @@ void DEBUGSTR( LPCWSTR szFormat, ... ) // sort of OutputDebugStringf
 
 
 
-SHARED int   installed	= FALSE;
 SHARED DWORD primary_id = 0;
 SHARED DWORD parent_pid = 0;
 
@@ -169,9 +168,9 @@ SHARED Option option = {
   '+',                          // prefix character to update history line
 };
 
-SHARED WCHAR cfgname[MAX_PATH] = { 0 }; // default configuration file
-SHARED WCHAR cmdname[MAX_PATH] = { 0 }; // runtime configuration file
-SHARED WCHAR hstname[MAX_PATH] = { 0 }; // primary history file
+SHARED WCHAR cfgname[MAX_PATH] = { 0 }; // configuration file
+SHARED WCHAR hstname[MAX_PATH] = { 0 }; // history file
+SHARED BOOL  cmd_history = FALSE;	// read command line history file
 
 
 // Structure to hold a line.
@@ -843,7 +842,7 @@ void expand_vars( BOOL );		// expand environment vars and symbols
 
 // History
 
-History  history = { &history, &history, 0 };	// constant empty line
+History  history = { &history, &history, { 0 } }; // constant empty line
 int	 histsize;				// number of lines in history
 #define  HISTSIZE 1000				// restrict the file to this
 
@@ -2749,6 +2748,25 @@ void read_history( void )
 }
 
 
+void check_history( void )
+{
+  if (*hstname)
+  {
+    if (*hstname == '-' && hstname[1] == '\0')
+    {
+      *local.hstname = '\0';
+      save_history = FALSE;
+    }
+    else
+    {
+      wcscpy( local.hstname, hstname );
+      save_history = TRUE;
+    }
+    *hstname = '\0';
+  }
+}
+
+
 // ------------------------   Filename Completion   --------------------------
 
 
@@ -3409,9 +3427,15 @@ BOOL read_cmdfile( PCWSTR name )
 	      }
 	    }
 	    GetFullPathName( tmp, lenof(local.hstname), local.hstname, NULL );
-	    save_history = TRUE;
 	    execute_rsth( 0 );
 	    read_history();
+	    save_history = TRUE;
+	    // Loading a specific history precludes being primary.
+	    if (primary)
+	    {
+	      primary = FALSE;
+	      primary_id = 0;
+	    }
 	  }
 	  cond = TRUE;
 	}
@@ -5808,20 +5832,13 @@ WINAPI MyReadConsoleW( HANDLE hConsoleInput, LPVOID lpBuffer,
 	p_attr_len = 0;
     }
 
-    if (*cmdname)
+    if (*cfgname)
     {
-      read_cmdfile( cmdname );
-      *cmdname = 0;
+      read_cmdfile( cfgname );
+      *cfgname = 0;
     }
 
-    if (*hstname)
-    {
-      if (*hstname == '-' && hstname[1] == '\0')
-	*local.hstname = '\0';
-      else
-	wcscpy( local.hstname, hstname );
-      *hstname = '\0';
-    }
+    check_history();
 
     line.txt = lpBuffer;
     max = nNumberOfCharsToRead - 2;	// leave room for CRLF
@@ -6091,49 +6108,6 @@ HookFn Hooks[] = {
 };
 
 
-BOOL ReadOptions( HKEY root )
-{
-  HKEY	key;
-  DWORD exist;
-
-  if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
-  {
-    exist = sizeof(option);
-    RegQueryValueEx( key, L"Options", NULL, NULL, (LPBYTE)&option, &exist );
-    if (exist != sizeof(option))
-    {
-      // Update options from earlier versions (I really gotta stop being lazy
-      // using binary writes...).
-      if (exist == offsetof(Option, base_col))
-	option.base_col = option.dir_col;
-      if (exist == offsetof(Option, ignore_char))
-	option.ignore_char = option.old_ignore_char;
-    }
-    exist = sizeof(cfgname);
-    RegQueryValueEx( key, L"Cmdfile", NULL, NULL, (LPBYTE)cfgname, &exist );
-    RegCloseKey( key );
-    return TRUE;
-  }
-  return FALSE;
-}
-
-
-BOOL ReadHistoryName( HKEY root )
-{
-  HKEY	key;
-  DWORD exist;
-
-  if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) == ERROR_SUCCESS)
-  {
-    exist = sizeof(local.hstname);
-    RegQueryValueEx( key,L"Hstfile", NULL,NULL, (LPBYTE)local.hstname, &exist );
-    RegCloseKey( key );
-    return TRUE;
-  }
-  return FALSE;
-}
-
-
 //-----------------------------------------------------------------------------
 //   DllMain()
 // Function called by the system when processes and threads are initialized
@@ -6145,42 +6119,28 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
   switch (dwReason)
   {
     case DLL_PROCESS_ATTACH:
-      if (!installed)
-      {
-	if (!ReadOptions( HKEY_CURRENT_USER ))
-	  if (!ReadOptions( HKEY_LOCAL_MACHINE ))
-	    installed = -1;
-      }
       // Don't bother hooking into CMDread.
       if (lpReserved)			// static initialisation
 	break;
-      installed = TRUE;
 
       if (HookAPIOneMod( GetModuleHandle( NULL ), Hooks ))
       {
 	HookAPIOneMod( hInstance, Hooks );
 
-	// This is rather awkward.  I want to read the config file first, then
-	// the history.  But history lines in the config should have precedence
-	// over the saved history, so I need to read the saved history first.
-	// Specifying another history in the config will reset this one.
-	if (primary_id == 0)
+	if (primary_id == 0 || cmd_history)
 	{
-	  if (!ReadHistoryName( HKEY_CURRENT_USER ))
-	    ReadHistoryName( HKEY_LOCAL_MACHINE );
+	  check_history();
 	  read_history();
+	  if (primary_id == 0)
+	  {
+	    primary = TRUE;
+	    primary_id = GetCurrentProcessId();
+	  }
 	}
 	else
+	{
+	  *hstname = '\0';
 	  copy_parent_history();
-	if (*cfgname)
-	{
-	  set_codepage();
-	  read_cmdfile( cfgname );
-	}
-	if (primary_id == 0 && !save_history)
-	{
-	  save_history = primary = TRUE;
-	  primary_id = GetCurrentProcessId();
 	}
 	SetConsoleCtrlHandler( (PHANDLER_ROUTINE)ctrl_break, TRUE );
       }
@@ -6188,11 +6148,9 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
 
     case DLL_PROCESS_DETACH:
       if (save_history)
-      {
 	write_history();
-	if (primary)
-	  primary_id = 0;
-      }
+      if (primary)
+	primary_id = 0;
     break;
   }
 

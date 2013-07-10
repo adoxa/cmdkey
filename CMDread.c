@@ -55,13 +55,21 @@
 
   v2.11, 4 July, 2013:
   - fixed file names (GetFullPathNameW doesn't like the same buffers).
+
+  v2.12, 10 July, 2013:
+  * only write to the registry with an explicit -i;
+  * read the options here, not from edit.
 */
 
-#define PDATE L"4 July, 2013"
+#define PDATE L"10 July, 2013"
 
 #include "CMDread.h"
 #include "version.h"
 #include <tlhelp32.h>
+
+#ifndef offsetof
+# define offsetof(type, member) (size_t)(&(((type*)0)->member))
+#endif
 
 #ifdef __MINGW32__
 int _CRT_glob = 0;
@@ -89,14 +97,15 @@ BOOL  IsInstalled( DWORD id, PBYTE* base );
 void  GetStatus( DWORD id, PBYTE base );
 void  Inject( HANDLE hProcess );
 BOOL  GetRegKey( LPCWSTR, HKEY, LPCWSTR, PHKEY, LPDWORD );
+BOOL  ReadOptions( HKEY, BOOL );
 
 
-__declspec(dllimport) int    installed;
 __declspec(dllimport) DWORD  parent_pid;
 __declspec(dllimport) Option option;
+		      WCHAR  cmdname[MAX_PATH];
 __declspec(dllimport) WCHAR  cfgname[MAX_PATH];
-__declspec(dllimport) WCHAR  cmdname[MAX_PATH];
 __declspec(dllimport) WCHAR  hstname[MAX_PATH];
+__declspec(dllimport) BOOL   cmd_history;
 __declspec(dllimport) Status local;
 
 
@@ -125,7 +134,7 @@ int wmain( int argc, wchar_t* argv[] )
   char*  opt;
   LPWSTR ops;
   char	 state;
-  LPWSTR fname, hname;
+  LPWSTR hname;
   ULONG  num;
   HKEY	 key, root;
   DWORD  exist;
@@ -164,14 +173,20 @@ int wmain( int argc, wchar_t* argv[] )
 
   pid = GetParentProcessId();
   active = IsInstalled( pid, &base );
-  if (active && argc == 1)
+  if (!ReadOptions( HKEY_CURRENT_USER, active ))
+    ReadOptions( HKEY_LOCAL_MACHINE, active );
+  if (active)
   {
     GetStatus( pid, base );
-    status();
-    return 0;
+    if (argc == 1)
+    {
+      status();
+      return 0;
+    }
   }
-  update = (installed == -1);
-  fname = hname = NULL;
+
+  update = FALSE;
+  hname = NULL;
   root = HKEY_CURRENT_USER;
 
   for (j = 1; j < argc; ++j)
@@ -413,6 +428,7 @@ int wmain( int argc, wchar_t* argv[] )
 	  case 'f':
 	    hname = arg + 1;
 	    end = wcschr( arg + 1, '\0' );
+	    cmd_history = TRUE;
 	  break;
 
 	  default:
@@ -437,52 +453,40 @@ int wmain( int argc, wchar_t* argv[] )
 	return 1;
       }
       fclose( tmp );
-      fname = argv[j];
+      wcscpy( cfgname, argv[j] );
     }
   }
+  if (hname)
+  {
+    if (*hname)
+      GetFullPathName( hname, lenof(local.hstname), local.hstname, NULL );
+    else
+    {
+      local.hstname[0] = '-';
+      local.hstname[1] = '\0';
+      cmd_history = FALSE;
+    }
+  }
+  if (hname || !active)
+    wcscpy( hstname, local.hstname );
+  if (!active && !*cfgname)
+    wcscpy( cfgname, cmdname );
+
   if (update)
   {
-    if (hname && *hname)
-      GetFullPathName( hname, lenof(hstname), hstname, NULL );
-    if (fname && *fname)
-      GetFullPathName( fname, lenof(cfgname), cfgname, NULL );
-    else if (installed == -1)
-    {
-      j = GetEnvironmentVariable( L"USERPROFILE", cfgname, lenof(cfgname) );
-      wcscpy( cfgname + j, L"\\CMDread.cfg" );
-      if (!hname)
-      {
-	memcpy( hstname, cfgname, WSZ(j + 9) );
-	wcscpy( hstname + j + 9, L"hst" );
-	hname = hstname;
-      }
-    }
-
     if (!GetRegKey( L"update options", root, REGKEY, &key, &exist ))
       return 1;
+
+    if (*cfgname)
+      GetFullPathName( cfgname, lenof(cmdname), cmdname, NULL );
+
     RegSetValueEx( key, L"Options", 0, REG_BINARY, (LPBYTE)&option,
 		   sizeof(option) );
-    RegSetValueEx( key, L"Cmdfile", 0, REG_SZ, (LPBYTE)cfgname,
-		   WSZ(wcslen( cfgname ) + 1) );
-    if (hname)
-      RegSetValueEx( key, L"Hstfile", 0, REG_SZ, (LPBYTE)hstname,
-		     WSZ(wcslen( hstname ) + 1) );
+    RegSetValueEx( key, L"Cmdfile", 0, REG_SZ, (LPBYTE)cmdname,
+		   WSZ(wcslen( cmdname ) + 1) );
+    RegSetValueEx( key, L"Hstfile", 0, REG_SZ, (LPBYTE)local.hstname,
+		   WSZ(wcslen( local.hstname ) + 1) );
     RegCloseKey( key );
-  }
-  else
-  {
-    if (fname)
-      wcscpy( (active) ? cmdname : cfgname, fname );
-    if (hname)
-    {
-      if (*hname)
-	GetFullPathName( hname, lenof(hstname), hstname, NULL );
-      else
-      {
-	*hstname = '-';
-	hstname[1] = '\0';
-      }
-    }
   }
 
   if (!active)
@@ -498,6 +502,48 @@ int wmain( int argc, wchar_t* argv[] )
   }
 
   return 0;
+}
+
+
+BOOL ReadOptions( HKEY root, BOOL cfg_only )
+{
+  HKEY	key;
+  DWORD exist;
+
+  if (RegOpenKeyEx( root, REGKEY, 0, KEY_QUERY_VALUE, &key ) != ERROR_SUCCESS)
+  {
+    if (root == HKEY_LOCAL_MACHINE)
+    {
+      exist = GetEnvironmentVariable( L"USERPROFILE", cmdname, lenof(cmdname) );
+      wcscpy( cmdname + exist, L"\\CMDread.cfg" );
+      memcpy( local.hstname, cmdname, WSZ(exist + 9) );
+      wcscpy( local.hstname + exist + 9, L"hst" );
+    }
+    return FALSE;
+  }
+
+  exist = sizeof(cmdname);
+  RegQueryValueEx( key, L"Cmdfile", NULL, NULL, (LPBYTE)cmdname, &exist );
+  exist = sizeof(local.hstname);
+  RegQueryValueEx( key, L"Hstfile", NULL, NULL, (LPBYTE)local.hstname, &exist );
+
+  if (!cfg_only)
+  {
+    exist = sizeof(option);
+    RegQueryValueEx( key, L"Options", NULL, NULL, (LPBYTE)&option, &exist );
+    if (exist != sizeof(option))
+    {
+      // Update options from earlier versions (I really gotta stop being lazy
+      // using binary writes...).
+      if (exist == offsetof(Option, base_col))
+	option.base_col = option.dir_col;
+      if (exist == offsetof(Option, ignore_char))
+	option.ignore_char = option.old_ignore_char;
+    }
+  }
+  RegCloseKey( key );
+
+  return TRUE;
 }
 
 
@@ -529,8 +575,8 @@ void status( void )
   else
     wcscpy( hst, L"none" );
 
-  if (*cfgname)
-    _snwprintf( name, lenof(name), L"\"%s\"", cfgname );
+  if (*cmdname)
+    _snwprintf( name, lenof(name), L"\"%s\"", cmdname );
   else
     wcscpy( name, L"none" );
 
@@ -811,7 +857,7 @@ void help( void )
   L"\n"
   L"CMDread [-begkortz_] [-c[INS][,OVR]] [-h[HIST]] [-lLEN] [-pCHAR] [-qCHAR]\n"
   L"        [-kcCMD] [-kmSEL] [-krREC] [-kdDRV] [-ksSEP] [-kpDIR] [-kbBASE] [-kgGT]\n"
-  L"        [-f[HISTFILE]] [CFGFILE] [-iu]\n"
+  L"        [-f[HISTFILE]] [CFGFILE] [-iIuU]\n"
   L"\n"
   L"    -b\t\tdisable backslash appending for completed directories\n"
   L"    -c\t\tswap insert and overwrite cursors, or set their size\n"

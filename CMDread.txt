@@ -3,7 +3,7 @@
 
 			  Copyright 2006-13 Jason Hood
 
-			    Version 2.11.  Freeware
+			    Version 2.12.  Freeware
 
 
 Description
@@ -28,7 +28,9 @@ Usage
 
     Running "CMDread" will install CMDread into its parent process (typically
     CMD.EXE, but it may also work with other command processors).  Usually,
-    though, you will use "-i" to start it with every instance of CMD.EXE.
+    though, you will use "-i" to start it with every instance of CMD.EXE.  If
+    it's already installed, "CMDread" by itself (without any options) will
+    display the running status.
 
 Upgrading
 ---------
@@ -749,11 +751,23 @@ Known Problems
     A hidden command that has no output will add a blank line if the previous
     line is not blank (assuming that to be its output).
 
+    The primary history file will be shared between the 64- and 32-bit
+    versions (i.e. the first instance of each will both be regarded as primary,
+    so the one that exits last will overwrite the other).
+
+    The configuration file shown in the status is the one used if CMDread is
+    installed (via "-i"), which is not necessarily the file specified on the
+    command line.
+
 
 History
 =======
 
     Legend: + added, - bug-fixed, * changed.
+
+    v2.12, 10 July, 2013:
+    * modified option handling (only write to the registry with an explicit -i;
+      write to a specified history file).
 
     v2.11, 4 July, 2013:
     - fixed storing file names;
@@ -846,5 +860,5 @@ History
     + first release.
 
 
-=========================
-Jason Hood, 4 July, 2013.
+==========================
+Jason Hood, 10 July, 2013.
